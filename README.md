@@ -4,7 +4,7 @@ An Android companion reads fused orientation from `SensorManager`, sends quatern
 
 **ADB alone cannot supply live fused sensor data.** The companion app reads the sensors; ADB provides the USB transport. Streaming needs no Wi-Fi or internet. The initial tool installation and first Android build require internet to download dependencies. Subsequent streaming uses only the USB cable and PC loopback addresses.
 
-<p align = "centre">
+<p align = "center">
 <img width="480" height="270" alt="demo" src="https://github.com/user-attachments/assets/efe669a1-41f9-46d1-bd96-b5834cdc80b9" />
 </p>
 
