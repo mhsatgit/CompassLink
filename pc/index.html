@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CompassLink3D</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header class="top">
+        <div>
+          <div class="eyebrow">USB sensor bridge · local only</div>
+          <h1>CompassLink3D</h1>
+          <p class="sub">Live Android orientation, rendered on your PC.</p>
+        </div>
+        <div id="badge" class="badge">
+          <span class="dot"></span
+          ><span id="connection">Waiting for phone</span>
+        </div>
+      </header>
+      <section class="grid">
+        <article class="card">
+          <div class="cardhead">
+            <h2>Phone orientation</h2>
+            <span class="hint"
+              >Live pose · drag to orbit · double-click to reset</span
+            >
+          </div>
+          <canvas
+            id="view"
+            aria-label="Three-dimensional phone orientation"
+          ></canvas>
+        </article>
+        <article class="card">
+          <div class="cardhead">
+            <h2>Live sensor data</h2>
+            <span class="hint" id="age">No samples</span>
+          </div>
+          <div class="stats">
+            <div class="stat">
+              <div class="label">Heading · magnetic / relative</div>
+              <div class="value" id="heading">—</div>
+            </div>
+            <div class="stat">
+              <div class="label">Pitch</div>
+              <div class="value" id="pitch">—</div>
+            </div>
+            <div class="stat">
+              <div class="label">Roll</div>
+              <div class="value" id="roll">—</div>
+            </div>
+            <div class="stat">
+              <div class="label">Samples</div>
+              <div class="value" id="count">0</div>
+            </div>
+            <div class="stat sensor">
+              <div class="label">Quaternion · x, y, z, w</div>
+              <div class="value" id="quat">—</div>
+            </div>
+            <div class="stat sensor">
+              <div class="label">Android sensor</div>
+              <div class="value" id="sensor">—</div>
+            </div>
+          </div>
+        </article>
+      </section>
+      <section class="bottom">
+        <article class="card info">
+          <h2>Connect over USB</h2>
+          <p>
+            Start the PC server, connect the phone with USB debugging enabled,
+            then run <code>adb reverse tcp:8765 tcp:8765</code>. Press Start
+            streaming in the Android app.
+          </p>
+          <span class="pill">No Wi-Fi streaming</span
+          ><span class="pill">No cloud services</span
+          ><span class="pill">Local dashboard</span>
+        </article>
+        <article class="card info">
+          <h2>Orientation notes</h2>
+          <p>
+            The model uses Android's device axes and quaternion to update its 3D
+            pose. Heading comes from the phone's fused rotation sensor and can
+            drift or be affected by nearby magnetic sources. Keep the companion
+            app open during streaming.
+          </p>
+        </article>
+      </section>
+    </main>
+    <script type="module" src="/dashboard.js"></script>
+  </body>
+</html>

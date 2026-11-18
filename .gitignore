@@ -1,0 +1,10 @@
+node_modules/
+.tools/
+.gradle/
+android/.gradle/
+android/local.properties
+android/**/build/
+work/
+*.log
+outputs/
+*.tar.gz
