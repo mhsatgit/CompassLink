@@ -1,4 +1,4 @@
-# CompassLink3D
+# CompassLink
 
 An Android companion reads fused orientation from `SensorManager`, sends quaternions through an ADB reverse tunnel over USB, and drives a local PC dashboard with a 3D handset and live telemetry.
 
