@@ -12,11 +12,14 @@
     "format:check": "prettier --check README.md package.json pc tests scripts/*.cjs",
     "start": "node pc/server.js",
     "test": "node --test tests/*.test.js",
+    "setup:adb": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-android.ps1 -PlatformToolsOnly",
     "setup:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-android.ps1",
     "build:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps1",
     "connect": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1",
     "connect:usb": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode USB",
-    "connect:wireless": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode Wireless"
+    "connect:wireless": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode Wireless",
+    "connect:prebuilt:usb": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode USB -SkipInstall",
+    "connect:prebuilt:wireless": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode Wireless -SkipInstall"
   },
   "devDependencies": {
     "prettier": "3.6.2"

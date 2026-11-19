@@ -4,13 +4,15 @@ param(
     [string]$Address,
     [switch]$Pair,
     [string]$PairAddress,
-    [switch]$Reinstall
+    [switch]$Reinstall,
+    [switch]$SkipInstall
 )
 
 $ErrorActionPreference = 'Stop'
+if ($SkipInstall -and $Reinstall) { throw 'Use either -SkipInstall or -Reinstall, not both.' }
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $adb = "$projectRoot/.tools/android-sdk/platform-tools/adb.exe"
-if (!(Test-Path $adb)) { throw 'Run npm run setup:android first' }
+if (!(Test-Path $adb)) { throw 'Run npm run setup:adb for the prebuilt app, or npm run setup:android to build from source.' }
 
 function Assert-Endpoint([string]$Endpoint) {
     if ($Endpoint -notmatch '^[a-zA-Z0-9.-]+:\d{1,5}$') {
@@ -43,25 +45,29 @@ if ($Mode -eq 'Wireless') {
 
 $deviceState = & $adb -s $serial get-state
 if ($LASTEXITCODE -ne 0 -or $deviceState -ne 'device') { throw 'Phone is unauthorized or offline. Check debugging settings and reconnect.' }
-$installed = @()
-if (!$Reinstall) {
-    # pm path exits with code 1 when the app is absent on a first connection.
-    # Listing packages succeeds with no matches, keeping that case distinct
-    # from an actual ADB/package-manager failure. Check the active Android user.
-    $installed = & $adb -s $serial shell pm list packages --user current com.compasslink3d
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to check the companion installation.' }
-}
-if ($Reinstall -or !($installed -match '^package:com\.compasslink3d\s*$')) {
-    $apk = "$projectRoot/android/app/build/outputs/apk/debug/app-debug.apk"
-    if (!(Test-Path $apk)) { throw 'Run npm run build:android first' }
-    & $adb -s $serial install -r $apk
-    if ($LASTEXITCODE -ne 0) { throw 'APK installation failed' }
+if ($SkipInstall) {
+    Write-Host 'Skipping APK installation. Install apk/CompassLink.apk on your phone manually before connecting.'
 } else {
-    Write-Host 'Companion already installed; skipping installation. Use -Reinstall after rebuilding the app.'
+    $installed = @()
+    if (!$Reinstall) {
+        # pm path exits with code 1 when the app is absent on a first connection.
+        # Listing packages succeeds with no matches, keeping that case distinct
+        # from an actual ADB/package-manager failure. Check the active Android user.
+        $installed = & $adb -s $serial shell pm list packages --user current com.compasslink3d
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to check the companion installation.' }
+    }
+    if ($Reinstall -or !($installed -match '^package:com\.compasslink3d\s*$')) {
+        $apk = "$projectRoot/android/app/build/outputs/apk/debug/app-debug.apk"
+        if (!(Test-Path $apk)) { throw 'Run npm run build:android first' }
+        & $adb -s $serial install -r $apk
+        if ($LASTEXITCODE -ne 0) { throw 'APK installation failed' }
+    } else {
+        Write-Host 'Companion already installed; skipping installation. Use -Reinstall after rebuilding the app.'
+    }
 }
 & $adb -s $serial reverse tcp:8765 tcp:8765
 if ($LASTEXITCODE -ne 0) { throw "$Mode port forwarding failed" }
 $modeValue = $Mode.ToLowerInvariant()
 & $adb -s $serial shell am start -n com.compasslink3d/.MainActivity --es connection_mode $modeValue
-if ($LASTEXITCODE -ne 0) { throw 'Unable to open companion app' }
+if ($LASTEXITCODE -ne 0) { throw 'Unable to open companion app. If using -SkipInstall, install apk/CompassLink.apk on the phone first.' }
 Write-Host "$Mode tunnel ready. Run npm start, open http://127.0.0.1:8000, and tap Start streaming on your phone."

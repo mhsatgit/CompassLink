@@ -1,3 +1,5 @@
+param([switch]$PlatformToolsOnly)
+
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $projectRoot = Split-Path $PSScriptRoot -Parent
@@ -26,6 +28,14 @@ function Get-Archive($url, $name, $destination, $sha1 = '') {
     } else {
         Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
     }
+}
+
+if ($PlatformToolsOnly) {
+    if (!(Test-Path "$toolsRoot/android-sdk/platform-tools/adb.exe")) {
+        Get-Archive 'https://dl.google.com/android/repository/platform-tools_r37.0.1-win.zip' 'platform-tools_r37.0.1-win.zip' "$toolsRoot/android-sdk" 'e03e78b1d80b396f1c3358e31251cb31740e1110'
+    }
+    Write-Host 'ADB installed. Install apk/CompassLink.apk on your phone, then run a connect:prebuilt command.'
+    return
 }
 
 if (!(Test-Path "$toolsRoot/jdk")) {
