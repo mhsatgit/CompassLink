@@ -5,6 +5,18 @@ const context = canvas.getContext("2d");
 const field = (id, value) => {
   document.getElementById(id).textContent = value;
 };
+const modeButtons = document.querySelectorAll("[data-mode]");
+for (const button of modeButtons) {
+  button.addEventListener("click", () => {
+    for (const option of modeButtons) {
+      const selected = option === button;
+      option.classList.toggle("selected", selected);
+      option.setAttribute("aria-pressed", String(selected));
+    }
+    document.getElementById("guide-usb").hidden = button.dataset.mode !== "usb";
+    document.getElementById("guide-wireless").hidden = button.dataset.mode !== "wireless";
+  });
+}
 let quaternion = [0, 0, 0, 1];
 let orbit = [0, 0];
 let pointer = null;
@@ -178,6 +190,19 @@ async function poll() {
           ? "Connected · waiting for samples"
           : "Receiving sensor data",
     );
+    const mode = data.last?.connectionMode;
+    field(
+      "active-mode",
+      !data.connected
+        ? "No active stream"
+        : data.stale
+          ? "Waiting for fresh sensor samples"
+          : mode === "wireless"
+            ? "Streaming via wireless debugging"
+            : mode === "usb"
+              ? "Streaming via USB cable"
+              : "Streaming via ADB tunnel",
+    );
     field("count", data.count.toLocaleString());
     if (data.last) {
       quaternion = data.last.q;
@@ -202,9 +227,11 @@ async function poll() {
   } catch {
     document.getElementById("badge").classList.remove("on");
     field("connection", "Server unavailable");
+    field("active-mode", "Server unavailable");
   } finally {
     window.setTimeout(poll, 50);
   }
 }
 draw();
 poll();
+

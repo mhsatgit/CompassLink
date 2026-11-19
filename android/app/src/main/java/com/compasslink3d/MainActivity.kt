@@ -1,6 +1,7 @@
 package com.compasslink3d
 
 import android.app.Activity
+import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -25,15 +26,30 @@ class MainActivity : Activity(), SensorEventListener {
     private val quaternion = FloatArray(4)
     private var samples = 0L
     private var lastUiTimestamp = 0L
+    private var connectionMode = "unknown"
+
+    private fun readConnectionMode() {
+        connectionMode = intent.getStringExtra("connection_mode")
+            ?.takeIf { it == "usb" || it == "wireless" } ?: "unknown"
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        stopStream()
+        setIntent(intent)
+        readConnectionMode()
+        status.text = "Ready - USB or wireless ADB tunnel required"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        readConnectionMode()
         manager = getSystemService(SENSOR_SERVICE) as SensorManager
         sensor = manager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             ?: manager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
         status = TextView(this).apply {
             textSize = 18f
-            text = "Ready · USB debugging required"
+            text = "Ready - USB or wireless ADB tunnel required"
         }
         values = TextView(this).apply {
             textSize = 16f
@@ -107,6 +123,7 @@ class MainActivity : Activity(), SensorEventListener {
             put("sensor", event.sensor.stringType)
             put("accuracy", event.accuracy)
             put("q", JSONArray(q.toList()))
+            put("connectionMode", connectionMode)
         }.toString())
         samples++
         if (event.timestamp - lastUiTimestamp >= 100_000_000L) {
@@ -125,3 +142,4 @@ class MainActivity : Activity(), SensorEventListener {
         super.onPause()
     }
 }
+

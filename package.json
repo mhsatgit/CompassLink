@@ -2,7 +2,7 @@
   "name": "compasslink3d",
   "version": "1.0.0",
   "private": true,
-  "description": "USB Android orientation dashboard",
+  "description": "USB and wireless Android orientation dashboard",
   "engines": {
     "node": ">=18"
   },
@@ -14,9 +14,12 @@
     "test": "node --test tests/*.test.js",
     "setup:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-android.ps1",
     "build:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps1",
-    "connect": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1"
+    "connect": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1",
+    "connect:usb": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode USB",
+    "connect:wireless": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode Wireless"
   },
   "devDependencies": {
     "prettier": "3.6.2"
   }
 }
+

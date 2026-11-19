@@ -36,6 +36,9 @@ function parsePacket(line) {
         ? packet.timestampNs.slice(0, 32)
         : null,
     accuracy: Number.isInteger(packet.accuracy) ? packet.accuracy : null,
+    connectionMode: ["usb", "wireless"].includes(packet.connectionMode)
+      ? packet.connectionMode
+      : "unknown",
   };
 }
 
@@ -154,7 +157,7 @@ if (require.main === module) {
     .start()
     .then(() => {
       console.log("Dashboard: http://127.0.0.1:8000");
-      console.log("USB sensor receiver: 127.0.0.1:8765");
+      console.log("USB / wireless ADB sensor receiver: 127.0.0.1:8765");
     })
     .catch((error) => {
       console.error(`Cannot start CompassLink3D: ${error.message}`);
@@ -164,3 +167,4 @@ if (require.main === module) {
     process.once(signal, () => app.close());
 }
 module.exports = { createCompassServer, parsePacket };
+

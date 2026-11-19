@@ -10,7 +10,7 @@
     <main>
       <header class="top">
         <div>
-          <div class="eyebrow">USB sensor bridge · local only</div>
+          <div class="eyebrow">USB + wireless sensor bridge &middot; local dashboard</div>
           <h1>CompassLink3D</h1>
           <p class="sub">Live Android orientation, rendered on your PC.</p>
         </div>
@@ -19,6 +19,16 @@
           ><span id="connection">Waiting for phone</span>
         </div>
       </header>
+      <section class="connection-bar card" aria-label="Phone connection">
+        <div>
+          <div class="eyebrow">Connection mode</div>
+          <p id="active-mode" aria-live="polite">No active stream</p>
+        </div>
+        <div class="mode-options" role="group" aria-label="Connection instructions">
+          <button type="button" class="mode-button selected" data-mode="usb" aria-pressed="true">USB cable</button>
+          <button type="button" class="mode-button" data-mode="wireless" aria-pressed="false">Wireless debugging</button>
+        </div>
+      </section>
       <section class="grid">
         <article class="card">
           <div class="cardhead">
@@ -67,15 +77,23 @@
       </section>
       <section class="bottom">
         <article class="card info">
-          <h2>Connect over USB</h2>
-          <p>
-            Start the PC server, connect the phone with USB debugging enabled,
-            then run <code>adb reverse tcp:8765 tcp:8765</code>. Press Start
-            streaming in the Android app.
-          </p>
-          <span class="pill">No Wi-Fi streaming</span
-          ><span class="pill">No cloud services</span
-          ><span class="pill">Local dashboard</span>
+          <h2>Connect your phone</h2>
+          <div id="guide-usb">
+            <p>Enable USB debugging, connect a data cable, and accept the authorization prompt.</p>
+            <pre><code>npm run connect:usb</code></pre>
+            <p>Run <code>npm start</code>, then tap <strong>Start streaming</strong> on your phone.</p>
+            <span class="pill">Android 8+</span><span class="pill">No Wi-Fi needed</span>
+          </div>
+          <div id="guide-wireless" hidden>
+            <p>On Android 11+, connect both devices to the same Wi-Fi. Enable Developer options &gt; Wireless debugging &gt; Pair device with pairing code.</p>
+            <pre><code>npm run connect:wireless -- -Pair</code></pre>
+            <p>Enter the pairing address and code when prompted, then the connection address from the main Wireless debugging page. These ports are different.</p>
+            <pre><code>npm run connect:wireless</code></pre>
+            <p>Use this shorter command after pairing. Run <code>npm start</code> and tap <strong>Start streaming</strong>. No USB cable is required.</p>
+            <span class="pill">Android 11+</span><span class="pill">Same Wi-Fi</span>
+          </div>
+          <p class="connection-note">These buttons show setup instructions. Run the commands in your project terminal to connect. Installed apps are reused; pass <code>-Reinstall</code> after rebuilding.</p>
+          <span class="pill">No cloud services</span><span class="pill">Local dashboard</span>
         </article>
         <article class="card info">
           <h2>Orientation notes</h2>
@@ -91,3 +109,4 @@
     <script type="module" src="/dashboard.js"></script>
   </body>
 </html>
+

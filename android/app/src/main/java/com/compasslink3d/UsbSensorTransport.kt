@@ -14,7 +14,7 @@ class UsbSensorTransport(private val onStatus: (String) -> Unit) {
 
     fun start() {
         check(worker == null) { "Transport already started" }
-        worker = thread(name = "CompassLink3D-USB", isDaemon = true) {
+        worker = thread(name = "CompassLink3D-ADB", isDaemon = true) {
             while (running) {
                 try {
                     Socket().use { socket ->
@@ -22,7 +22,7 @@ class UsbSensorTransport(private val onStatus: (String) -> Unit) {
                         if (!running) return@thread
                         socket.connect(InetSocketAddress("127.0.0.1", 8765), 1500)
                         socket.tcpNoDelay = true
-                        onStatus("Connected through ADB USB tunnel")
+                        onStatus("Connected through ADB tunnel (USB / wireless)")
                         val writer = socket.getOutputStream().bufferedWriter(Charsets.UTF_8)
                         while (running) {
                             latest.getAndSet(null)?.let { line ->
@@ -62,3 +62,4 @@ class UsbSensorTransport(private val onStatus: (String) -> Unit) {
         latest.set(null)
     }
 }
+

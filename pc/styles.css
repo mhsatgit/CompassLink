@@ -174,3 +174,63 @@ canvas {
     height: 350px;
   }
 }
+
+.connection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+.connection-bar p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+.mode-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mode-button {
+  font: inherit;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: #0c1527;
+  border-radius: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+.mode-button.selected {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: #163344;
+}
+.mode-button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 4px;
+}
+pre {
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #0c1527;
+  border-radius: 10px;
+  overflow-x: auto;
+  color: var(--cyan);
+}
+.info .connection-note {
+  margin-top: 14px;
+}
+[hidden] {
+  display: none !important;
+}
+@media (max-width: 760px) {
+  .connection-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .cardhead {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
