@@ -246,10 +246,6 @@ The existing tests cover quaternion normalization and invalid data rejection, fr
 - **Old app behavior after rebuilding:** connect with `-Reinstall` to install the newly built APK.
 - **ADB is not recognized:** use the local executable shown in Manual ADB Commands or use the npm connection helpers.
 
-## Limitations
-
-V1 displays fused orientation and a 3D handset representation. It does not mirror the phone's screen or show separate raw accelerometer, gyroscope and magnetometer streams. Sensor accuracy depends on hardware and calibration. Wireless debugging requires Android 11+ and a compatible local network.
-
 ## References
 
 - [Android Debug Bridge and wireless debugging](https://developer.android.com/tools/adb)
