@@ -74,9 +74,36 @@ if ($SkipInstall) {
 & $adb -s $serial reverse tcp:8765 tcp:8765
 if ($LASTEXITCODE -ne 0) { throw "$Mode port forwarding failed" }
 $modeValue = $Mode.ToLowerInvariant()
-$launchOutput = & $adb -s $serial shell am start -n com.compasslink3d/.MainActivity --es connection_mode $modeValue
+$tokenBytes = New-Object byte[] 32
+$generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try { $generator.GetBytes($tokenBytes) } finally { $generator.Dispose() }
+$controllerToken = ([BitConverter]::ToString($tokenBytes) -replace '-', '').ToLowerInvariant()
+$tokenDirectory = Join-Path $projectRoot '.tools'
+$tokenPath = Join-Path $tokenDirectory 'controller-authorization.json'
+$pendingPath = Join-Path $tokenDirectory ([guid]::NewGuid().ToString() + '.tmp')
+[void][System.IO.Directory]::CreateDirectory($tokenDirectory)
+try {
+    $grant = @{ token = $controllerToken; mode = $modeValue } | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText($pendingPath, $grant)
+    if ([System.IO.File]::Exists($tokenPath)) {
+        [System.IO.File]::Replace($pendingPath, $tokenPath, [NullString]::Value)
+    } else {
+        [System.IO.File]::Move($pendingPath, $tokenPath)
+    }
+} finally {
+    [System.IO.File]::Delete($pendingPath)
+}
+$launchArgs = @('-s', $serial, 'shell', 'am', 'start', '--activity-clear-top', '--activity-single-top',
+    '-n', 'com.compasslink3d/.MainActivity', '--es', 'connection_mode', $modeValue,
+    '--es', 'controller_token', $controllerToken, '2>&1')
+$launchOutput = & $adb @launchArgs
+if ($LASTEXITCODE -eq 0 -and ($launchOutput -match 'its current task has been brought to the front')) {
+    # Some Android builds bring a background task forward without delivering the extras.
+    Start-Sleep -Milliseconds 250
+    $launchOutput = & $adb @launchArgs
+}
 if ($LASTEXITCODE -ne 0 -or ($launchOutput -match 'Error:|Error type|Exception')) {
     throw 'Unable to open companion app. If using -SkipInstall, install the prebuilt CompassLink APK on the phone first. See README Method 1.'
 }
 $launchOutput | Write-Host
-Write-Host "$Mode tunnel ready. Run npm start, open http://127.0.0.1:8000, and tap Start streaming on your phone."
+Write-Host "$Mode tunnel ready. Run npm start, open http://127.0.0.1:8000, and tap Start streaming or Controller Mode on your phone."

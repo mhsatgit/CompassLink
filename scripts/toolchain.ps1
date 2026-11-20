@@ -94,8 +94,13 @@ function Assert-LocalJdk {
 function Initialize-AndroidBuild {
     Initialize-AndroidEnvironment
     # Replace a stale SDK path from an older checkout even if setup is incomplete.
-    $sdk = $env:ANDROID_HOME
-    Set-Content -LiteralPath "$compassProjectRoot/android/local.properties" -Value ('sdk.dir=' + $sdk.Replace('\', '/')) -Encoding ASCII
+    $sdk = $env:ANDROID_HOME.Replace('\', '/').Replace(':', '\:')
+    # Android reads this as a Java properties file, including its escape rules.
+    $sdk = [regex]::Replace($sdk, '[^\u0020-\u007E]', {
+        param($character)
+        '\u{0:x4}' -f [int][char]$character.Value
+    })
+    [System.IO.File]::WriteAllText("$compassProjectRoot/android/local.properties", "sdk.dir=$sdk`n")
     Assert-LocalJdk
     foreach ($requirement in (Get-AndroidSdkRequirements)) {
         if (!(Test-AndroidSdkRequirement $requirement)) {

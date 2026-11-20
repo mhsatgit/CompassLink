@@ -3,7 +3,8 @@ import { multiply, rotate, toView, orientationAngles } from "./orientation.js";
 const canvas = document.querySelector("#view");
 const context = canvas.getContext("2d");
 const field = (id, value) => {
-  document.getElementById(id).textContent = value;
+  const element = document.getElementById(id);
+  if (element.textContent !== value) element.textContent = value;
 };
 const modeButtons = document.querySelectorAll("[data-mode]");
 for (const button of modeButtons) {
@@ -14,7 +15,8 @@ for (const button of modeButtons) {
       option.setAttribute("aria-pressed", String(selected));
     }
     document.getElementById("guide-usb").hidden = button.dataset.mode !== "usb";
-    document.getElementById("guide-wireless").hidden = button.dataset.mode !== "wireless";
+    document.getElementById("guide-wireless").hidden =
+      button.dataset.mode !== "wireless";
   });
 }
 let quaternion = [0, 0, 0, 1];
@@ -171,6 +173,63 @@ canvas.addEventListener("dblclick", () => {
 });
 window.addEventListener("resize", draw);
 
+const controllerControls = document.getElementById("controller-controls");
+const controlLabels = {
+  DPAD_UP: "D-pad Up",
+  DPAD_DOWN: "D-pad Down",
+  DPAD_LEFT: "D-pad Left",
+  DPAD_RIGHT: "D-pad Right",
+  ACTION_A: "Action A",
+  ACTION_B: "Action B",
+};
+const keyLabels = { SPACE: "Space", ESCAPE: "Escape" };
+
+function renderController(controller, connected) {
+  const link =
+    controller?.connectionMode === "wireless" ? "wireless debugging" : "USB";
+  field(
+    "controller-mode",
+    controller?.active ? `Controller active · ${link}` : "Controller off",
+  );
+  field("controller-engine", controller?.engineMessage ?? "Server unavailable");
+  const held = controller?.held ?? [];
+  field(
+    "controller-activity",
+    !controller
+      ? "Server unavailable"
+      : controller.active
+        ? held.length
+          ? held.map(({ key }) => keyLabels[key] ?? key).join(" + ") + " held"
+          : "Ready for input"
+        : connected
+          ? "Open Controller Mode on your phone"
+          : "Waiting for phone",
+  );
+  if (controller && !controllerControls.hasChildNodes()) {
+    for (const [control, key] of Object.entries(controller.mappings)) {
+      const item = document.createElement("li");
+      item.dataset.control = control;
+      const keycap = document.createElement("kbd");
+      keycap.textContent = keyLabels[key] ?? key;
+      item.append(controlLabels[control], keycap);
+      controllerControls.append(item);
+    }
+  }
+  for (const item of controllerControls.children) {
+    item.classList.toggle(
+      "held",
+      held.some(({ control }) => control === item.dataset.control),
+    );
+  }
+  const event = controller?.lastEvent;
+  field(
+    "controller-last",
+    event
+      ? `Last event · ${controlLabels[event.control]} · ${keyLabels[event.key] ?? event.key} ${event.action.toLowerCase()}`
+      : "No controller events",
+  );
+}
+
 async function poll() {
   try {
     const response = await fetch("/api/state", {
@@ -181,13 +240,18 @@ async function poll() {
     const data = await response.json();
     document
       .getElementById("badge")
-      .classList.toggle("on", data.connected && !data.stale);
+      .classList.toggle(
+        "on",
+        data.connected && (!data.stale || data.controller.active),
+      );
     field(
       "connection",
       !data.connected
         ? "Waiting for phone"
         : data.stale
-          ? "Connected · waiting for samples"
+          ? data.controller.active
+            ? "Receiving controller input"
+            : "Connected · waiting for samples"
           : "Receiving sensor data",
     );
     const mode = data.last?.connectionMode;
@@ -196,13 +260,18 @@ async function poll() {
       !data.connected
         ? "No active stream"
         : data.stale
-          ? "Waiting for fresh sensor samples"
+          ? data.controller.active
+            ? data.controller.connectionMode === "wireless"
+              ? "Controller via wireless debugging"
+              : "Controller via USB cable"
+            : "Waiting for fresh sensor samples"
           : mode === "wireless"
             ? "Streaming via wireless debugging"
             : mode === "usb"
               ? "Streaming via USB cable"
               : "Streaming via ADB tunnel",
     );
+    renderController(data.controller, data.connected);
     field("count", data.count.toLocaleString());
     if (data.last) {
       quaternion = data.last.q;
@@ -228,10 +297,10 @@ async function poll() {
     document.getElementById("badge").classList.remove("on");
     field("connection", "Server unavailable");
     field("active-mode", "Server unavailable");
+    renderController(null, false);
   } finally {
     window.setTimeout(poll, 50);
   }
 }
 draw();
 poll();
-

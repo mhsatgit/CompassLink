@@ -1,7 +1,10 @@
 const http = require("node:http");
 const net = require("node:net");
 const fs = require("node:fs/promises");
+const { readFileSync } = require("node:fs");
 const path = require("node:path");
+const { createController } = require("./controller");
+const { WindowsInput } = require("./windows-input");
 const HOST = "127.0.0.1";
 const ASSETS = new Map([
   ["/", ["index.html", "text/html"]],
@@ -12,7 +15,10 @@ const ASSETS = new Map([
 ]);
 
 function parsePacket(line) {
-  const packet = JSON.parse(line);
+  return parseSensorSample(JSON.parse(line));
+}
+
+function parseSensorSample(packet) {
   if (
     !packet ||
     !Array.isArray(packet.q) ||
@@ -42,8 +48,38 @@ function parsePacket(line) {
   };
 }
 
-function createCompassServer({ httpPort = 8000, sensorPort = 8765 } = {}) {
+function readControllerAuthorization() {
+  try {
+    const authorization = JSON.parse(
+      readFileSync(
+        path.join(__dirname, "..", ".tools", "controller-authorization.json"),
+        "utf8",
+      ),
+    );
+    if (
+      typeof authorization?.token === "string" &&
+      ["usb", "wireless"].includes(authorization.mode)
+    )
+      return authorization;
+  } catch {
+    // A missing or unreadable grant disables controller input. Legacy samples still work.
+  }
+  return null;
+}
+
+function createCompassServer({
+  httpPort = 8000,
+  sensorPort = 8765,
+  engine = new WindowsInput(),
+  readAuthorization = readControllerAuthorization,
+  controllerTimeoutMs,
+} = {}) {
   const state = { last: null, receivedAt: null, count: 0 };
+  const controller = createController({
+    engine,
+    readAuthorization,
+    timeoutMs: controllerTimeoutMs,
+  });
   const clients = new Set();
   const web = http.createServer(async (req, res) => {
     const pathname = new URL(req.url, `http://${HOST}`).pathname;
@@ -66,6 +102,7 @@ function createCompassServer({ httpPort = 8000, sensorPort = 8765 } = {}) {
           age,
           connected: clients.size > 0,
           stale: age === null || age > 2,
+          controller: controller.snapshot(),
         }),
       );
       return;
@@ -89,6 +126,7 @@ function createCompassServer({ httpPort = 8000, sensorPort = 8765 } = {}) {
   const sensors = net.createServer((socket) => {
     clients.add(socket);
     socket.setEncoding("utf8");
+    socket.setNoDelay(true);
     socket.setTimeout(10000, () => socket.destroy());
     let buffer = "";
     socket.on("data", (chunk) => {
@@ -102,8 +140,18 @@ function createCompassServer({ httpPort = 8000, sensorPort = 8765 } = {}) {
           return;
         }
         if (!line) continue;
+        let packet;
         try {
-          state.last = parsePacket(line);
+          packet = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (packet && Object.hasOwn(packet, "type")) {
+          if (!socket.writableEnded) controller.receive(socket, packet);
+          continue;
+        }
+        try {
+          state.last = parseSensorSample(packet);
           state.receivedAt = Date.now();
           state.count++;
         } catch {
@@ -112,7 +160,10 @@ function createCompassServer({ httpPort = 8000, sensorPort = 8765 } = {}) {
       }
       if (buffer.length > 4096) socket.destroy();
     });
-    socket.on("close", () => clients.delete(socket));
+    socket.on("close", () => {
+      clients.delete(socket);
+      controller.disconnect(socket);
+    });
     socket.on("error", () => socket.destroy());
   });
   async function start() {
@@ -127,16 +178,23 @@ function createCompassServer({ httpPort = 8000, sensorPort = 8765 } = {}) {
     try {
       await listen(sensors, sensorPort);
       await listen(web, httpPort);
+      engine.start();
     } catch (error) {
       await close();
       throw error;
     }
     return { httpPort: web.address().port, sensorPort: sensors.address().port };
   }
-  async function close() {
+  let closing;
+  function close() {
+    return (closing ??= shutdown());
+  }
+  async function shutdown() {
+    controller.stop();
     for (const socket of clients) socket.destroy();
-    await Promise.all(
-      [web, sensors].map(
+    await Promise.all([
+      engine.close(),
+      ...[web, sensors].map(
         (server) =>
           new Promise((resolve) => {
             if (!server.listening) {
@@ -147,7 +205,7 @@ function createCompassServer({ httpPort = 8000, sensorPort = 8765 } = {}) {
             server.closeIdleConnections?.();
           }),
       ),
-    );
+    ]);
   }
   return { start, close };
 }
@@ -157,7 +215,7 @@ if (require.main === module) {
     .start()
     .then(() => {
       console.log("Dashboard: http://127.0.0.1:8000");
-      console.log("USB / wireless ADB sensor receiver: 127.0.0.1:8765");
+      console.log("USB / wireless ADB receiver: 127.0.0.1:8765");
     })
     .catch((error) => {
       console.error(`Cannot start CompassLink3D: ${error.message}`);
@@ -167,4 +225,3 @@ if (require.main === module) {
     process.once(signal, () => app.close());
 }
 module.exports = { createCompassServer, parsePacket };
-

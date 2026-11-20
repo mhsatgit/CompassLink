@@ -75,6 +75,27 @@
           </div>
         </article>
       </section>
+      <section class="card controller-card" aria-labelledby="controller-title">
+        <div class="cardhead">
+          <h2 id="controller-title">Motion Control</h2>
+          <span class="hint" id="controller-mode">Controller off</span>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="label">Windows input engine</div>
+            <div class="value" id="controller-engine">Checking engine</div>
+          </div>
+          <div class="stat">
+            <div class="label">Input activity</div>
+            <div class="value" id="controller-activity">Waiting for phone</div>
+          </div>
+          <div class="stat controller-wide">
+            <div class="label">Controller mappings</div>
+            <ul id="controller-controls" class="controller-controls"></ul>
+            <div class="hint" id="controller-last">No controller events</div>
+          </div>
+        </div>
+      </section>
       <section class="bottom">
         <article class="card info">
           <h2>Connect your phone</h2>

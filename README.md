@@ -20,6 +20,7 @@ The companion reads the sensors; ADB provides the transport. USB streaming needs
 
 - **Two Connection Options:** Connect by USB cable or Android 11+ wireless debugging using dedicated npm commands.
 - **Live 3D Orientation:** Quaternion-driven handset rendering with drag-to-orbit controls and double-click camera reset.
+- **Touchscreen Controller:** Snapshot 1 sends WASD, Space and Escape to Windows while the dashboard monitors live input.
 - **Sensor Telemetry:** Heading, pitch, roll, quaternion components, sample count, sensor accuracy and sample age.
 - **Connection-Aware Dashboard:** USB/wireless setup guides, active stream mode, waiting state and stale-data indicators.
 - **Fast Reconnect:** Reuse an installed companion; explicitly reinstall after rebuilding the Android app.
@@ -60,11 +61,14 @@ Run the commands below from the extracted or cloned project folder. The PC dashb
 
 ### Method 1: Prebuilt APK + PC Dashboard
 
-Choose this method to use the included **[apk/CompassLink3D.apk](apk/CompassLink3D.apk)** with the PC dashboard, without building the Android app.
+Choose an included APK to use with the PC dashboard:
+
+- **[CompassLink3Dv1.1.apk](apk/CompassLink3Dv1.1.apk)** includes the Snapshot 1 touchscreen controller and sensor mode.
+- **[CompassLink3D.apk](apk/CompassLink3D.apk)** is the original sensor companion.
 
 **1. Install the prebuilt APK on the phone.**
 
-Copy `apk/CompassLink3D.apk` from the project folder to the phone, open it, and allow installation from that source when Android prompts. The app must be installed before the prebuilt connection commands run.
+Copy your chosen APK from the project folder to the phone, open it, and allow installation from that source when Android prompts. The app must be installed before the prebuilt connection commands run.
 
 **2. Download ADB on the PC.**
 
@@ -171,7 +175,34 @@ npm start
 
 To stop, tap **Stop streaming** and press **Ctrl+C** in the server terminal. Streaming also stops when the phone app leaves the foreground. Repeat the connection command when reconnecting.
 
-The dashboard's USB/wireless buttons display instructions; they do not connect a phone by themselves. The active mode comes from incoming sensor samples. Wireless ports can change after restarting Wireless debugging; use the current connection address and pair again only if needed.
+The dashboard's USB/wireless buttons display instructions; they do not connect a phone by themselves. Sensor connection mode comes from incoming samples. Controller connection mode comes from the ADB launch command. Wireless ports can change after restarting Wireless debugging; use the current connection address and pair again only if needed.
+
+### Controller Mode (Snapshot 1)
+
+Install the [Snapshot 1 prebuilt APK](apk/CompassLink3Dv1.1.apk) (`1.1-snapshot.1`, version code 2) using Method 1. If you build from source using Method 2, install your build once with the matching connection command:
+
+```powershell
+npm run connect:usb -- -Reinstall
+# Or, for first-time wireless pairing and installation:
+npm run connect:wireless -- -Pair -Reinstall
+```
+
+On later connections, omit `-Reinstall`. To guarantee connection without APK installation, use `npm run connect:prebuilt:usb` or `npm run connect:prebuilt:wireless` with the already installed app. Add `-- -Pair` if the phone needs wireless pairing.
+
+1. Run `npm start` in a normal Windows desktop session and open the dashboard. Node uses Windows PowerShell 5.1 and the system .NET Framework to compile the input helper on first startup or after a source change, then starts it automatically. A separate .NET SDK, helper build command, terminal or administrator session is unnecessary.
+2. Tap **Controller Mode** on the phone. Wait for **Windows input engine ready**, then focus a normal Windows text editor or key-state tester. The **Motion Control** card displays the session, mapped keys, held controls and latest event.
+3. Press and release the D-pad and action buttons. Hold **UP + LEFT**, then release **LEFT** while continuing to hold **UP**. Verify both keys are held together and only W remains held afterward. Hold a button while stopping Controller Mode or disconnecting to check key release.
+4. Tap **Motion / Sensor** or **Stop Controller** to return to the sensor screen. If you started streaming before opening Controller Mode, the 3D dashboard continues receiving sensor samples during play.
+
+| Touch control | Windows key |
+| --- | --- |
+| UP / DOWN / LEFT / RIGHT | W / S / A / D |
+| A | Space |
+| B | Escape |
+
+Windows limits `SendInput` to applications at the same or a lower integrity level. Some games and protected applications ignore synthetic input. Windows shares keyboard state between physical and injected input, so avoid holding the same mapped key from both sources during testing. See [the Microsoft SendInput documentation](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput).
+
+See the [Snapshot 1 implementation and test record](docs/snapshots/SNAPSHOT_01.md) for protocol details and hardware coverage.
 
 ### Connection Command Options
 
@@ -208,10 +239,12 @@ For Android Studio, run setup first, open `android/`, and select `.tools/jdk` as
 | Location | Purpose |
 | --- | --- |
 | `apk/CompassLink3D.apk` | Included prebuilt Android companion for Method 1 |
+| `apk/CompassLink3Dv1.<snapshotnumber>.apk` | Versioned prebuilt Android companion for each tested snapshot |
 | `android/app/src/main/` | Android companion: sensor collection, phone UI and TCP streaming |
 | `android/*.gradle.kts`, `android/app/build.gradle.kts` | Android project, plugin and SDK configuration |
 | `android/gradle/`, `android/gradlew*` | Gradle wrapper and pinned distribution metadata |
 | `pc/server.js` | Loopback TCP receiver, packet validation, HTTP server and state API |
+| `pc/controller.js`, `pc/windows-input.js`, `pc/windows/` | Controller protocol, held-key state and Windows input helper |
 | `pc/dashboard.js`, `pc/orientation.js` | 3D rendering, quaternion math and telemetry updates |
 | `pc/index.html`, `pc/styles.css` | Dashboard layout, styling and connection instructions |
 | `scripts/setup-android.ps1` | Full Android tool setup or ADB-only setup |
@@ -240,7 +273,7 @@ These are implementation settings, not measured performance guarantees. Sensor d
 | Method | Endpoint | Description |
 | :---: | :--- | :--- |
 | `GET` | `/` | Dashboard with orientation, telemetry and connection guides |
-| `GET` | `/api/state` | Latest sample, receipt time, count, age, connected and stale flags; `last.connectionMode` reports `usb`, `wireless` or `unknown` |
+| `GET` | `/api/state` | Latest sensor sample and connection status, plus controller mappings, engine readiness, held keys and the last event |
 
 Sensor data uses newline-delimited JSON on TCP port **8765**, through the selected ADB reverse tunnel.
 
@@ -266,6 +299,8 @@ The stream contains one UTF-8 JSON object per newline:
 `q` uses `[x,y,z,w]`, converted from Android's `[w,x,y,z]` output. The server validates finite components and normalizes them. `t` is phone wall-clock milliseconds; `timestampNs` is the monotonic sensor event timestamp, serialized as a string to preserve precision. The dashboard age uses PC receipt time and is not a measurement of transport latency. Accuracy codes are Android's -1/0/1/2/3 (no contact, unreliable, low, medium, high); availability varies by sensor. This version displays fused orientation, not separate raw accelerometer/gyro/magnetometer streams.
 
 ## Running Tests and Maintenance
+
+After implementing a snapshot and completing its tests, copy `android/app/build/outputs/apk/debug/app-debug.apk` to `apk/CompassLink3Dv1.<snapshotnumber>.apk`. Use the snapshot number without leading zeros. For example, Snapshot 1 is `apk/CompassLink3Dv1.1.apk`.
 
 Run `npm run clean` with builds stopped to remove project-generated caches, intermediate build files, and downloaded Android command-line tools and Gradle installer ZIPs (`.tools/commandlinetools-win-*_latest.zip` and `.tools/gradle-*-bin.zip`). These ZIPs are no longer needed after installation. It retains source, lockfiles and the debug APK, and retains the repo-local `.tools/` installations, signing key and dependency caches. The next build regenerates project caches. The dashboard can still be started normally with `npm start`.
 

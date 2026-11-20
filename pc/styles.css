@@ -128,6 +128,36 @@ canvas {
   overflow-wrap: anywhere;
   font-size: 14px;
 }
+.controller-card {
+  margin-top: 18px;
+}
+.controller-wide {
+  grid-column: 1 / -1;
+}
+.controller-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 9px 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.controller-controls li {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.controller-controls li.held {
+  border-color: var(--cyan);
+  background: #163344;
+  color: var(--text);
+}
+.controller-controls kbd {
+  margin-left: 6px;
+  font-weight: 700;
+  color: var(--cyan);
+}
 .bottom {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -167,7 +197,8 @@ canvas {
     margin-top: 14px;
   }
   .grid,
-  .bottom {
+  .bottom,
+  .controller-card .stats {
     grid-template-columns: 1fr;
   }
   canvas {
