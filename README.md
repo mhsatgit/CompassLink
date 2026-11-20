@@ -267,7 +267,7 @@ The stream contains one UTF-8 JSON object per newline:
 
 ## Running Tests and Maintenance
 
-Run `npm run clean` with builds stopped to remove project-generated caches and intermediate build files. It retains source, lockfiles and the debug APK, and retains the repo-local `.tools/` installations, signing key and dependency caches. The next build regenerates project caches. The dashboard can still be started normally with `npm start`.
+Run `npm run clean` with builds stopped to remove project-generated caches, intermediate build files, and downloaded Android command-line tools and Gradle installer ZIPs (`.tools/commandlinetools-win-*_latest.zip` and `.tools/gradle-*-bin.zip`). These ZIPs are no longer needed after installation. It retains source, lockfiles and the debug APK, and retains the repo-local `.tools/` installations, signing key and dependency caches. The next build regenerates project caches. The dashboard can still be started normally with `npm start`.
 
 For a clean Android rebuild, including generated Gradle scripts, transforms and build caches:
 

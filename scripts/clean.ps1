@@ -10,7 +10,7 @@ function Get-ProjectSize {
 }
 
 $before = Get-ProjectSize
-# Only remove generated files inside this project. Keep .tools and its build cache.
+# Only remove generated files inside this project. Keep installed tools and their build cache.
 $targets = @(
     'work',
     'android/.gradle',
@@ -44,6 +44,15 @@ if ($BuildCaches) {
         }
     }
 }
+# Installer archives are disposable after setup; keep the extracted installations.
+$toolsRoot = Join-Path $projectRoot '.tools'
+if (Test-Path -LiteralPath $toolsRoot) {
+    foreach ($archive in (Get-ChildItem -LiteralPath $toolsRoot -File -Force)) {
+        if ($archive.Name -like 'commandlinetools-win-*_latest.zip' -or $archive.Name -like 'gradle-*-bin.zip') {
+            $targets += '.tools/' + $archive.Name
+        }
+    }
+}
 foreach ($relativePath in $targets) {
     $target = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $relativePath))
     if (!$target.StartsWith($projectPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -73,5 +82,5 @@ Write-Host ('Freed:  {0:N2} GiB' -f (($before - $after) / 1GB))
 if ($BuildCaches) {
     Write-Host 'Generated Android output and Gradle build caches cleared. Downloaded tools, Maven dependencies and signing keys retained.'
 } else {
-    Write-Host 'APK retained. Repository-local .tools (JDK, SDK, signing key and Gradle cache) was not modified.'
+    Write-Host 'APK, installed JDK/SDK/Gradle, signing key and Gradle cache retained. Downloaded command-line tools and Gradle installer ZIPs removed.'
 }
