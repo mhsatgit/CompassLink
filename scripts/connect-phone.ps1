@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet('USB', 'Wireless')]
     [string]$Mode = 'USB',
     [string]$Address,
@@ -11,8 +11,8 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($SkipInstall -and $Reinstall) { throw 'Use either -SkipInstall or -Reinstall, not both.' }
 $projectRoot = Split-Path $PSScriptRoot -Parent
-$adb = "$projectRoot/.tools/android-sdk/platform-tools/adb.exe"
-if (!(Test-Path $adb)) { throw 'Run npm run setup:adb for the prebuilt app, or npm run setup:android to build from source.' }
+. "$PSScriptRoot/toolchain.ps1"
+$adb = Resolve-Adb
 
 function Assert-Endpoint([string]$Endpoint) {
     if ($Endpoint -notmatch '^[a-zA-Z0-9.-]+:\d{1,5}$') {
@@ -20,6 +20,11 @@ function Assert-Endpoint([string]$Endpoint) {
     }
     $port = [int]($Endpoint.Split(':')[-1])
     if ($port -lt 1 -or $port -gt 65535) { throw 'Port must be between 1 and 65535.' }
+}
+
+& $adb start-server
+if ($LASTEXITCODE -ne 0) {
+    throw 'ADB server could not start on PC port 5037. Check other ADB instances and local networking restrictions.'
 }
 
 if ($Mode -eq 'Wireless') {
@@ -41,12 +46,13 @@ if ($Mode -eq 'Wireless') {
     if ($LASTEXITCODE -ne 0 -or !$serial -or $serial -eq 'unknown') {
         throw 'Connect exactly one authorized USB debugging phone; unlock it and accept the USB prompt.'
     }
+    $serial = $serial.Trim()
 }
 
 $deviceState = & $adb -s $serial get-state
 if ($LASTEXITCODE -ne 0 -or $deviceState -ne 'device') { throw 'Phone is unauthorized or offline. Check debugging settings and reconnect.' }
 if ($SkipInstall) {
-    Write-Host 'Skipping APK installation. Install apk/CompassLink.apk on your phone manually before connecting.'
+    Write-Host 'Skipping APK installation. The prebuilt CompassLink companion must already be installed on your phone.'
 } else {
     $installed = @()
     if (!$Reinstall) {
@@ -68,6 +74,9 @@ if ($SkipInstall) {
 & $adb -s $serial reverse tcp:8765 tcp:8765
 if ($LASTEXITCODE -ne 0) { throw "$Mode port forwarding failed" }
 $modeValue = $Mode.ToLowerInvariant()
-& $adb -s $serial shell am start -n com.compasslink3d/.MainActivity --es connection_mode $modeValue
-if ($LASTEXITCODE -ne 0) { throw 'Unable to open companion app. If using -SkipInstall, install apk/CompassLink.apk on the phone first.' }
+$launchOutput = & $adb -s $serial shell am start -n com.compasslink3d/.MainActivity --es connection_mode $modeValue
+if ($LASTEXITCODE -ne 0 -or ($launchOutput -match 'Error:|Error type|Exception')) {
+    throw 'Unable to open companion app. If using -SkipInstall, install the prebuilt CompassLink APK on the phone first. See README Method 1.'
+}
+$launchOutput | Write-Host
 Write-Host "$Mode tunnel ready. Run npm start, open http://127.0.0.1:8000, and tap Start streaming on your phone."

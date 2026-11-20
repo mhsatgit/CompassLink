@@ -1,3 +1,5 @@
+param([switch]$BuildCaches)
+
 $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 $projectPrefix = $projectRoot.TrimEnd('\') + '\'
@@ -8,37 +10,9 @@ function Get-ProjectSize {
 }
 
 $before = Get-ProjectSize
-$gradle = Join-Path $projectRoot '.tools/gradle-8.9/bin/gradle.bat'
-if (Test-Path -LiteralPath $gradle) {
-    $savedJava = $env:JAVA_HOME
-    $savedCache = $env:GRADLE_USER_HOME
-    try {
-        $env:JAVA_HOME = Join-Path $projectRoot '.tools/jdk'
-        $env:GRADLE_USER_HOME = Join-Path $projectRoot '.tools/gradle-cache'
-        & $gradle --stop
-        if ($LASTEXITCODE -ne 0) { throw 'Could not stop project Gradle daemons safely' }
-    } finally {
-        $env:JAVA_HOME = $savedJava
-        $env:GRADLE_USER_HOME = $savedCache
-    }
-}
-
-# Keep installed tools, cached dependency downloads, source, lockfiles and APK outputs.
+# Only remove generated files inside this project. Keep .tools and its build cache.
 $targets = @(
     'work',
-    '.tools/java-extract',
-    '.tools/sdk-extract',
-    '.tools/sdk-packages',
-    '.tools/sdk-licenses.log',
-    '.tools/android-sdk/.temp',
-    '.tools/android-sdk/build-tools/34.0.0/.installer',
-    '.tools/gradle-cache/.tmp',
-    '.tools/gradle-cache/caches/8.9',
-    '.tools/gradle-cache/caches/jars-9',
-    '.tools/gradle-cache/caches/journal-1',
-    '.tools/gradle-cache/daemon',
-    '.tools/gradle-cache/kotlin-profile',
-    '.tools/gradle-cache/android',
     'android/.gradle',
     'android/.kotlin',
     'android/app/build/generated',
@@ -47,17 +21,29 @@ $targets = @(
     'android/app/build/tmp',
     'android/app/build/reports'
 )
-$archives = @(
-    'jdk.zip', 'android-commandline.zip', 'gradle.zip',
-    'build-tools_r34-windows.zip', 'platform-35_r02.zip',
-    'platform-tools_r37.0.1-win.zip'
-)
-foreach ($archive in $archives) {
-    $targets += ".tools/$archive"
-    $targets += ".tools/$archive.partial"
-    $targets += ".tools/$archive.partial.parts"
+if ($BuildCaches) {
+    . "$PSScriptRoot/toolchain.ps1"
+    Initialize-AndroidEnvironment
+    $gradle = (Get-GradleDistribution).Executable
+    if (Test-Path -LiteralPath $gradle) {
+        & $gradle --stop --console=plain
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to stop repository-local Gradle daemons. Stop builds before clearing their caches.' }
+    }
+    $targets = @(
+        'work', '.gradle', '.kotlin', 'android/.gradle', 'android/.kotlin',
+        'android/build', 'android/app/build', '.tools/gradle-cache/.tmp',
+        '.tools/gradle-cache/daemon', '.tools/gradle-cache/native',
+        '.tools/gradle-cache/notifications'
+    )
+    $cacheRoot = Join-Path $projectRoot '.tools/gradle-cache/caches'
+    if (Test-Path -LiteralPath $cacheRoot) {
+        # Downloaded Maven dependencies are retained; the other caches contain
+        # generated scripts, artifact transforms, instrumentation and build state.
+        foreach ($entry in (Get-ChildItem -LiteralPath $cacheRoot -Force)) {
+            if ($entry.Name -ne 'modules-2') { $targets += '.tools/gradle-cache/caches/' + $entry.Name }
+        }
+    }
 }
-
 foreach ($relativePath in $targets) {
     $target = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $relativePath))
     if (!$target.StartsWith($projectPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -84,4 +70,8 @@ $after = Get-ProjectSize
 Write-Host ('Before: {0:N2} GiB' -f ($before / 1GB))
 Write-Host ('After:  {0:N2} GiB' -f ($after / 1GB))
 Write-Host ('Freed:  {0:N2} GiB' -f (($before - $after) / 1GB))
-Write-Host 'APK and installed build/runtime tools retained. The next Android build will regenerate its caches.'
+if ($BuildCaches) {
+    Write-Host 'Generated Android output and Gradle build caches cleared. Downloaded tools, Maven dependencies and signing keys retained.'
+} else {
+    Write-Host 'APK retained. Repository-local .tools (JDK, SDK, signing key and Gradle cache) was not modified.'
+}

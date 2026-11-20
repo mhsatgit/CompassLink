@@ -19,10 +19,10 @@
     "connect:usb": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode USB",
     "connect:wireless": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode Wireless",
     "connect:prebuilt:usb": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode USB -SkipInstall",
-    "connect:prebuilt:wireless": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode Wireless -SkipInstall"
+    "connect:prebuilt:wireless": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-phone.ps1 -Mode Wireless -SkipInstall",
+    "test:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps1 -Check"
   },
   "devDependencies": {
     "prettier": "3.6.2"
   }
 }
-

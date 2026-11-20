@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)
-![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?logo=kotlin&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-AGP_builtin-7F52FF?logo=kotlin&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-8%2B-3DDC84?logo=android&logoColor=white)
 ![Connection](https://img.shields.io/badge/Connection-USB%20%7C%20Wireless-009688)
 
@@ -33,76 +33,84 @@ The companion reads the sensors; ADB provides the transport. USB streaming needs
 | **Frontend** | JavaScript, HTML5 Canvas | ![JavaScript](https://img.shields.io/badge/JavaScript-ES_Modules-F7DF1E) | Handset projection, camera controls and telemetry |
 | **Styling** | CSS | ![CSS](https://img.shields.io/badge/CSS-Responsive-663399) | Dark dashboard, cards and connection controls |
 | **Backend** | Node.js built-ins | ![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933) | HTTP server, TCP receiver and state API |
-| **Android App** | Kotlin, SensorManager | ![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF) | Fused orientation, phone UI and lifecycle |
+| **Android App** | Kotlin, SensorManager | ![Kotlin](https://img.shields.io/badge/Kotlin-AGP_builtin-7F52FF) | Fused orientation, phone UI and lifecycle |
 | **Transport** | Android Debug Bridge | ![ADB](https://img.shields.io/badge/ADB-USB%20%2F%20Wireless-009688) | Pairing, connection and reverse tunnel |
-| **Android Build** | Android Gradle Plugin, Gradle | ![AGP](https://img.shields.io/badge/AGP-8.7.3-3DDC84) ![Gradle](https://img.shields.io/badge/Gradle-8.9-02303A) | APK packaging and reproducible builds |
-| **Java Runtime** | Microsoft OpenJDK | ![JDK](https://img.shields.io/badge/JDK-17-orange) | Local Android build runtime |
+| **Android Build** | Android Gradle Plugin, Gradle | ![AGP](https://img.shields.io/badge/AGP-9.5.1-3DDC84) ![Gradle](https://img.shields.io/badge/Gradle-9.9.1-02303A) | APK packaging and reproducible builds |
+| **Java Runtime** | JDK 25 (Oracle/OpenJDK) | ![JDK](https://img.shields.io/badge/JDK-25-orange) | Local Android build runtime |
 | **Tooling** | PowerShell, Prettier, Node test runner | ![Prettier](https://img.shields.io/badge/Prettier-3.6.2-F7B93E) | Setup/build helpers, formatting and existing tests |
 
 ## Getting Started
 
-### Prerequisites
+### Requirements
 
-- **Windows PowerShell**, **Node.js 18+** and npm.
-- A physical Android phone with a rotation-vector or game-rotation-vector sensor.
-- **USB:** Android 8+ and a USB data cable.
-- **Wireless debugging:** Android 11+ and PC/phone on the same Wi-Fi.
-- Internet for initial tool installation and Android build dependencies.
+- **PC:** Windows x64, PowerShell, and [Node.js 18+ with npm](https://nodejs.org/).
+- **Phone:** Android 8+ with a rotation-vector or game-rotation-vector sensor.
+- **USB:** a USB data cable and USB debugging enabled.
+- **Wireless:** Android 11+, Wireless debugging enabled, and both devices on the same Wi-Fi network.
+- **Internet:** required for initial tool and build-dependency downloads. Streaming works offline.
 
-### Method 1: Run Using the Prebuilt APK
-
-Use this method to run CompassLink without building the Android app.
-
-**1. Install the companion on your phone:**
-
-Download [CompassLink.apk](apk/CompassLink.apk) from this repository, or copy it from the project's `apk/` folder to your phone. Open the APK on the phone and allow installation from that source when prompted. Install it before running the connection commands below.
-
-**2. Prepare the PC:**
-
-Open a terminal in the project folder:
+Download the source ZIP using GitHub's **Code > Download ZIP** and extract it, or clone the repository:
 
 ```powershell
-npm install
+git clone https://github.com/mhsatgit/CompassLink.git
+cd CompassLink
+```
+
+Run the commands below from the extracted or cloned project folder. The PC dashboard is included in `pc/`. All Android tools are downloaded automatically into the ignored `.tools/` folder; no Android Studio installation, global Java/ADB installation, or manual PATH changes are required.
+
+### Method 1: Prebuilt APK + PC Dashboard
+
+Choose this method to use the included **[apk/CompassLink3D.apk](apk/CompassLink3D.apk)** with the PC dashboard, without building the Android app.
+
+**1. Install the prebuilt APK on the phone.**
+
+Copy `apk/CompassLink3D.apk` from the project folder to the phone, open it, and allow installation from that source when Android prompts. The app must be installed before the prebuilt connection commands run.
+
+**2. Download ADB on the PC.**
+
+```powershell
 npm run setup:adb
 ```
 
-`setup:adb` downloads only Android platform-tools (ADB) into `.tools/android-sdk/platform-tools`. This method needs no JDK, Gradle, Android build tools or `npm run build:android`. If you already ran `setup:android`, ADB is ready and you can skip `setup:adb`.
+This downloads only Android Platform Tools into `.tools/android-sdk/platform-tools/`. This method needs no JDK, Gradle, full Android SDK, or APK build. The dashboard uses Node.js built-ins, so `npm install` is not required for this method.
 
-**3. Choose USB or wireless:**
+**3. Choose a connection.**
 
-For **USB**, enable Developer options > USB debugging, connect exactly one phone with a USB data cable, unlock it and accept the authorization prompt:
+For **USB**, connect the phone using a data cable, unlock it, enable USB debugging, and accept the PC authorization prompt:
 
 ```powershell
 npm run connect:prebuilt:usb
 ```
 
-For **wireless**, connect both devices to the same Wi-Fi. On Android 11+, enable Developer options > Wireless debugging, open **Pair device with pairing code**, then run:
+For **wireless**, enable Wireless debugging and open **Pair device with pairing code** on the phone. Both devices must be on the same Wi-Fi network:
 
 ```powershell
 npm run connect:prebuilt:wireless -- -Pair
 ```
 
-Enter the pairing IP address and port, then the pairing code. Return to the main Wireless debugging page and enter its connection IP address and port. **The pairing and connection ports are different.** `-Pair` is a switch; it does not take an address as its value.
+Enter the pairing address and pairing code, then the connection address from the main Wireless debugging page. **The pairing port and connection port are different.**
 
-For subsequent wireless connections, run:
+For later wireless connections:
 
 ```powershell
 npm run connect:prebuilt:wireless
 ```
 
-Or supply the current connection address from the phone directly:
+These commands always skip APK installation. They create the ADB tunnel and open the companion already installed on the phone.
+
+**4. Start the dashboard.**
 
 ```powershell
-npm run connect:prebuilt:wireless -- -Address 192.168.1.20:37123
+npm start
 ```
 
-Both `connect:prebuilt:*` commands use `-SkipInstall`: they connect to the phone, create the debug tunnel and open the already installed companion. They never install or reinstall an APK and do not require a locally built APK. If the app is missing, install `apk/CompassLink.apk` on the phone manually and rerun the command. Use these same commands whenever reconnecting with the prebuilt app.
+Continue with [Start Streaming](#start-streaming) below.
 
-### Method 2: Build and Run from Source
+### Method 2: Build the APK from Source + PC Dashboard
 
-Use this method to build the companion yourself or install your Android code changes.
+Choose this method to create the APK yourself or install Android code changes.
 
-**1. Install dependencies and build:**
+**1. Install dependencies and Android tools, then build.**
 
 ```powershell
 npm install
@@ -110,114 +118,109 @@ npm run setup:android
 npm run build:android
 ```
 
-Setup installs Microsoft OpenJDK 17, Gradle 8.9, Android command-line tools, platform-tools (ADB), Android platform 35 and Build Tools 34.0.0 into `.tools/`. It accepts the Android SDK tool licenses as part of installation. It does not replace your system Java. Build scripts select the local JDK and SDK for their own process. Android plugins are pinned to AGP 8.7.3 and Kotlin 2.0.21.
+Setup installs the JDK, Gradle, Android command-line tools, Platform Tools, SDK Platform and Build Tools inside `.tools/`. It verifies downloaded archive checksums and reuses completed installations. The first setup/build can take several minutes. If interrupted, rerun the same command.
 
-The built APK is at `android/app/build/outputs/apk/debug/app-debug.apk`. Building does not update the distributed copy at `apk/CompassLink.apk` automatically.
+The built APK is saved at:
 
-**2. Choose USB or wireless:**
-
-For **USB**, enable Developer options > USB debugging, connect exactly one phone using a USB data cable and accept its authorization prompt:
-
-```powershell
-npm run connect:usb -- -Reinstall
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-For **wireless**, connect both devices to the same Wi-Fi, enable Wireless debugging and open **Pair device with pairing code**:
+**2. Choose a connection.**
 
-```powershell
-npm run connect:wireless -- -Pair -Reinstall
-```
-
-Enter the pairing address and code, then the separate connection address from the main Wireless debugging page. If already paired, omit `-Pair`.
-
-For subsequent connections, choose one:
+For **USB**, enable USB debugging, connect a data cable, unlock the phone and accept authorization:
 
 ```powershell
 npm run connect:usb
-npm run connect:wireless
-# Or provide the current wireless connection address:
-npm run connect:wireless -- -Address 192.168.1.20:37123
 ```
 
-The existing `npm run connect` command also selects USB mode. These source connection commands install the locally built APK if the companion is missing and skip installation if it is already installed. Use `-Reinstall` after rebuilding to install the new version:
+For first-time **wireless** pairing, use Android 11+ on the same Wi-Fi network and open the phone's pairing-code dialog:
+
+```powershell
+npm run connect:wireless -- -Pair
+```
+
+Use the pairing address/code, followed by the separate connection address from the main Wireless debugging page. For later wireless connections:
+
+```powershell
+npm run connect:wireless
+```
+
+The source connection commands install the built APK only if the companion is missing. If already installed, it is reused. `npm run connect` is an alias for USB.
+
+After changing Android code and rebuilding, explicitly update the phone app:
 
 ```powershell
 npm run build:android
 npm run connect:usb -- -Reinstall
-# Or:
+# Or, for an already paired wireless phone:
 npm run connect:wireless -- -Reinstall
 ```
 
-### Start the Dashboard and Stream (Both Methods)
-
-After connecting with either method:
+**3. Start the dashboard.**
 
 ```powershell
 npm start
 ```
 
-Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and tap **Start streaming** on the phone. Keep the app in the foreground; it keeps the screen awake during streaming. Rotate the handset through all axes. Drag the PC view to orbit the camera and double-click to reset it.
+### Start Streaming
 
-To stop, tap **Stop streaming** and press **Ctrl+C** in the server terminal. The app also stops when it leaves the foreground. Repeat your chosen connection command if the tunnel is lost. Wireless debugging ports may change after restarting or toggling Wireless debugging; always use the current connection address and pair again only if the PC is no longer paired.
+1. Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in a browser on the PC.
+2. Tap **Start streaming** in the phone app and keep it in the foreground.
+3. Rotate the phone to see the 3D handset and telemetry update. Drag the view to orbit; double-click to reset the camera.
 
-The dashboard's USB/wireless buttons show setup instructions. Use the terminal commands for your chosen run method to connect. The active mode comes from the latest fresh sensor sample; older APKs or manual launches without mode metadata show a generic ADB stream.
+To stop, tap **Stop streaming** and press **Ctrl+C** in the server terminal. Streaming also stops when the phone app leaves the foreground. Repeat the connection command when reconnecting.
 
-## Manual ADB commands
+The dashboard's USB/wireless buttons display instructions; they do not connect a phone by themselves. The active mode comes from incoming sensor samples. Wireless ports can change after restarting Wireless debugging; use the current connection address and pair again only if needed.
 
-The npm helpers use the project's local ADB, so it does not need to be on PATH. The manual install lines below are optional for the source-build method; skip them when the prebuilt companion is already installed. For manual commands, select the executable in PowerShell:
+### Connection Command Options
 
-```powershell
-$adb = Join-Path (Get-Location) '.tools/android-sdk/platform-tools/adb.exe'
-& $adb devices -l
-```
+Append options after npm's `--` separator:
 
-### USB
+| Option | Purpose | Example |
+| --- | --- | --- |
+| `-Address IP:PORT` | Use the phone's current wireless connection address without prompting | `npm run connect:wireless -- -Address 192.168.1.20:37123` |
+| `-Pair` | Pair before establishing a wireless connection | `npm run connect:prebuilt:wireless -- -Pair` |
+| `-PairAddress IP:PORT` | Supply the pairing address; the pairing code remains interactive | `npm run connect:wireless -- -PairAddress 192.168.1.20:40001 -Address 192.168.1.20:37123` |
+| `-Reinstall` | Install the newly built APK over the existing app | `npm run connect:usb -- -Reinstall` |
 
-```powershell
-& $adb -d install -r android/app/build/outputs/apk/debug/app-debug.apk
-& $adb -d reverse tcp:8765 tcp:8765
-& $adb -d shell am start -n com.compasslink3d/.MainActivity --es connection_mode usb
-& $adb -d reverse --list
-# Optional tunnel removal after stopping:
-& $adb -d reverse --remove tcp:8765
-```
+The `connect:prebuilt:*` commands select `-SkipInstall` automatically. Do not combine them with `-Reinstall`. Example IPs and ports above are placeholders; use the values displayed on the phone.
 
-### Wireless
+## Build Configuration
 
-Replace both example ports with those displayed on your phone:
+| Component | Configuration |
+| --- | --- |
+| JDK | 25; fresh setup downloads Temurin 25.0.3+9 |
+| Gradle | 9.9.1; version and checksum pinned in the Gradle wrapper properties |
+| Android Gradle Plugin | 9.5.1, with built-in Kotlin compilation |
+| Compile SDK / Build Tools | Android 37.0 / 37.0.0 |
+| Target / minimum Android API | 35 / 26 (Android 8+) |
+| Java / Kotlin bytecode target | 17 |
+| SDK package manager | Repo-local Android CLI using `android sdk install` |
+| Tool and build-dependency location | `.tools/` |
 
-```powershell
-& $adb pair 192.168.1.20:40001
-& $adb connect 192.168.1.20:37123
-& $adb -s 192.168.1.20:37123 install -r android/app/build/outputs/apk/debug/app-debug.apk
-& $adb -s 192.168.1.20:37123 reverse tcp:8765 tcp:8765
-& $adb -s 192.168.1.20:37123 shell am start -n com.compasslink3d/.MainActivity --es connection_mode wireless
-& $adb -s 192.168.1.20:37123 reverse --list
-```
+The scripts resolve paths relative to their own location. `android/local.properties` is generated for each checkout and is excluded from source control and source archives. Android preferences and the debug signing key stay in `.tools/android-user/`; only `ANDROID_USER_HOME` is used for the preference location. The helpers do not change Windows user/system environment variables.
 
-After stopping, remove the wireless tunnel with `& $adb -s IP:PORT reverse --remove tcp:8765` and disconnect with `& $adb disconnect IP:PORT`.
-
-`-d` selects USB; `-s IP:PORT` selects the wireless connection. Both modes forward phone `127.0.0.1:8765` to PC loopback port 8765. The dashboard binds only `127.0.0.1:8000`; no dashboard or sensor listener is opened to the LAN. There are no remote JavaScript, font or CDN dependencies. Android's `INTERNET` permission is required for the companion's TCP sockets.
-
-## Android Studio
-
-After setup, open `android/` in Android Studio. Set the Gradle JDK to the project's `.tools/jdk` (JDK 17). `android/local.properties` points to the project SDK and is generated by setup. The project includes a Gradle wrapper so the build version is reproducible. Select a connected phone and run `app`. Create the reverse tunnel before tapping Start streaming. The command-line build does not require Android Studio.
+For Android Studio, run setup first, open `android/`, and select `.tools/jdk` as the Gradle JDK and `.tools/android-sdk` as the SDK. CLI builds do not require Android Studio.
 
 ## Project Structure
 
-| Location                                                            | Purpose                                                                           |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `android/app/src/main/java/com/compasslink3d/MainActivity.kt`       | Sensor registration, sample serialization, foreground lifecycle and phone UI      |
-| `android/app/src/main/java/com/compasslink3d/UsbSensorTransport.kt` | Disposable connection sessions, reconnect, latest-sample queue and socket cleanup |
-| `pc/server.js`                                                      | Loopback TCP receiver, bounded framing, validation, HTTP assets and state API     |
-| `pc/dashboard.js`                                                   | Canvas phone renderer, camera controls, sequential polling and stale status       |
-| `pc/orientation.js`                                                 | Quaternion math, coordinate mapping and Android orientation angles                |
-| `pc/styles.css`                                                     | Responsive dashboard styling                                                      |
-| `pc/index.html`                                                     | Dashboard markup, telemetry cards and USB/wireless setup guides                  |
-| `apk/CompassLink.apk` | Prebuilt Android companion for manual phone installation |
-| `scripts/connect-phone.ps1`                                         | USB selection, wireless pairing/connect, optional install and tunnel setup        |
-| `scripts/`                                                          | Local tool setup, APK build, downloads and cleanup helpers                        |
-| `tests/`                                                            | Packet validation, TCP/API integration and orientation regressions                |
+| Location | Purpose |
+| --- | --- |
+| `apk/CompassLink3D.apk` | Included prebuilt Android companion for Method 1 |
+| `android/app/src/main/` | Android companion: sensor collection, phone UI and TCP streaming |
+| `android/*.gradle.kts`, `android/app/build.gradle.kts` | Android project, plugin and SDK configuration |
+| `android/gradle/`, `android/gradlew*` | Gradle wrapper and pinned distribution metadata |
+| `pc/server.js` | Loopback TCP receiver, packet validation, HTTP server and state API |
+| `pc/dashboard.js`, `pc/orientation.js` | 3D rendering, quaternion math and telemetry updates |
+| `pc/index.html`, `pc/styles.css` | Dashboard layout, styling and connection instructions |
+| `scripts/setup-android.ps1` | Full Android tool setup or ADB-only setup |
+| `scripts/toolchain.ps1`, `scripts/install-sdk.ps1`, `scripts/sdk-repository.ps1` | Portable tool paths, Android CLI installation and SDK feed parsing |
+| `scripts/build-android.ps1` | APK build and optional Android checks |
+| `scripts/connect-phone.ps1` | USB/wireless connection, optional install, ADB tunnel and companion launch |
+| `scripts/download.cjs`, `scripts/clean.ps1` | Tool downloads and generated-file cleanup |
+| `tests/` | Protocol, math, setup and cleanup regression tests |
+| `.gitignore` | Exclude generated files from Git |
 
 ## Streaming Behavior Summary
 
@@ -264,35 +267,59 @@ The stream contains one UTF-8 JSON object per newline:
 
 ## Running Tests and Maintenance
 
-To remove installer ZIPs, extraction leftovers, interrupted downloads and generated build caches, run `npm run clean` with builds stopped. It keeps the source, installed tools, downloaded build dependencies and debug APK. The next Android build will take longer while it regenerates its caches. The dashboard can still be started normally with `npm start`.
+Run `npm run clean` with builds stopped to remove project-generated caches and intermediate build files. It retains source, lockfiles and the debug APK, and retains the repo-local `.tools/` installations, signing key and dependency caches. The next build regenerates project caches. The dashboard can still be started normally with `npm start`.
+
+For a clean Android rebuild, including generated Gradle scripts, transforms and build caches:
+
+```powershell
+npm run clean -- -BuildCaches
+npm run build:android
+```
+
+`-BuildCaches` first stops this clone's Gradle daemons, then removes project caches, all generated Android build output (including any previous APK), generated Gradle caches, temporary files and daemon logs. It keeps downloaded JDK/SDK/Gradle installations, Maven dependencies under `.tools/gradle-cache/caches/modules-2`, and the Android signing key. Gradle regenerates build state on the next build.
+
+To pass diagnostic options through npm to the build helper, use npm's `--` separator:
+
+```powershell
+npm run build:android -- -Stacktrace -Info
+```
 
 ```powershell
 npm test
 npm run build:android
-npx prettier --check package.json pc tests
+npm run test:android
+npm run format:check
 ```
 
-The existing tests cover quaternion normalization and invalid data rejection, fragmented TCP packets reaching the HTTP API, connection shutdown, asset serving, cardinal headings and coordinate mapping. They do not verify physical wireless pairing or hardware performance. Hardware verification requires a real phone: stream, rotate each axis, stop/restart, disconnect/reconnect using either mode, and verify relative heading with the game sensor fallback. No phone measurements are simulated in the normal dashboard.
+The tests cover quaternion normalization, invalid data rejection, fragmented TCP packets reaching the HTTP API, connection shutdown, asset serving, headings, coordinate mapping, downloader fallbacks, SDK feed parsing, installer argument handling and post-install checks, repo-local tool paths and cleanup safety. PowerShell checks run on Windows. They do not verify physical wireless pairing or hardware performance. Hardware verification requires a real phone: stream, rotate each axis, stop/restart, disconnect/reconnect using either mode, and verify relative heading with the game sensor fallback. No phone measurements are simulated in the normal dashboard.
 
 ## Troubleshooting
 
 - **Unauthorized/offline phone:** unlock it and accept the authorization prompt. For USB, check the cable; for wireless, check the current debugging address and Wi-Fi connection. Rerun the connection command for your mode.
-- **Waiting for phone:** confirm `npm start` is running, rerun the connection command for your mode, and tap **Start streaming**. Inspect the reverse tunnel using the USB or wireless manual commands above.
+- **Waiting for phone:** confirm `npm start` is running, rerun the connection command for your chosen method and mode, and tap **Start streaming** on the phone.
 - **No supported sensor:** this phone exposes neither rotation-vector sensor. An emulator may lack realistic fused orientation.
 - **Port already in use:** stop the other server using port 8000 or 8765 and restart CompassLink3D.
 - **Heading moves unexpectedly:** move away from metal/magnets and follow the phone manufacturer's calibration guidance. Game sensor heading is relative.
-- **Build download fails:** check internet access and retry setup/build. The `.tools` downloads and Gradle caches are local to this project. Offline streaming does not need access to those download servers.
+- **Tool download fails:** rerun `npm run setup:android`. Downloads have no script-imposed time limit and archives are checksum verified. A DNS error (`Could not resolve host`) or unreachable endpoint needs working internet/DNS; removing a timeout cannot fix that. Check access to `downloads.gradle.org`, `dl.google.com` and `api.adoptium.net`. Already installed repo-local tools are retained.
+- **Android preferences paths conflict:** rerun the updated npm build helper; it clears deprecated preference-location environment variables for that process and uses only `.tools/android-user`. If you configure Java system properties through an IDE or JVM options, remove conflicting `ANDROID_SDK_HOME` or `ANDROID_PREFS_ROOT` overrides there too. This exception occurs while AGP is configuring the project, before Kotlin compilation.
 - **Wireless pairing fails:** open a fresh pairing-code dialog and use its pairing port. Use the separate connection port from the main Wireless debugging page when prompted to connect.
 - **Wireless connection fails:** check both devices are on the same Wi-Fi and that the network allows communication between clients. Restart Wireless debugging and use its current address and port.
 - **Old app behavior after rebuilding:** connect with `-Reinstall` to install the newly built APK.
-- **ADB is not recognized:** use the local executable shown in Manual ADB Commands or use the npm connection helpers.
+- **ADB is not recognized:** run `npm run setup:adb` and use the npm connection commands or the repo-local executable shown above. No global ADB or PATH changes are required.
 
 ## References
 
 - [Android Debug Bridge and wireless debugging](https://developer.android.com/tools/adb)
-
+- [Android CLI overview and SDK path configuration](https://developer.android.com/tools/agents/android-cli)
+- [Android CLI SDK package identifiers](https://developer.android.com/tools/agents/android-cli/commands/sdk)
+- [Android CLI SDK installation](https://developer.android.com/tools/agents/android-cli/commands/sdk_install)
+- [Android CLI SDK package listing](https://developer.android.com/tools/agents/android-cli/commands/sdk_list)
 - [Android rotation vector sensors and device coordinates](https://developer.android.com/develop/sensors-and-location/sensors/sensors_motion)
 - [Android orientation and game rotation sensor](https://developer.android.com/develop/sensors-and-location/sensors/sensors_position)
-- [Android Gradle Plugin 8.7 compatibility: Gradle 8.9 and JDK 17](https://developer.android.com/build/releases/agp-8-7-0-release-notes)
+- [Android Gradle Plugin 9.5 compatibility and release notes](https://developer.android.com/build/releases/agp-9-5-0-release-notes)
 
-
+- [AGP built-in Kotlin migration](https://developer.android.com/build/migrate-to-built-in-kotlin)
+- [Gradle releases](https://gradle.org/releases/)
+- [Gradle Java compatibility](https://docs.gradle.org/current/userguide/compatibility.html)
+- [AGP compile SDK version and minor API level](https://developer.android.com/reference/tools/gradle-api/9.5/com/android/build/api/dsl/CompileSdkSpec)
+- [Official Gradle distribution checksums](https://gradle.org/release-checksums/)

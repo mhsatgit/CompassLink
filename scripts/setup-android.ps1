@@ -2,91 +2,87 @@ param([switch]$PlatformToolsOnly)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$projectRoot = Split-Path $PSScriptRoot -Parent
-$toolsRoot = Join-Path $projectRoot '.tools'
-New-Item -ItemType Directory -Force -Path $toolsRoot | Out-Null
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+. "$PSScriptRoot/toolchain.ps1"
+. "$PSScriptRoot/sdk-repository.ps1"
+. "$PSScriptRoot/install-sdk.ps1"
+Initialize-AndroidEnvironment
+New-Item -ItemType Directory -Force -Path $compassToolsRoot | Out-Null
+Write-Host "Installing tools inside $compassToolsRoot (external Java, SDK and Gradle installations are not used)."
 
-function Get-Archive($url, $name, $destination, $sha1 = '') {
-    $archive = Join-Path $toolsRoot $name
-    if (!(Test-Path -LiteralPath $archive) -or (Get-Item -LiteralPath $archive).Length -eq 0) {
-        Write-Host "Downloading $name"
-        & node "$PSScriptRoot/download.cjs" $url "$archive.partial"
-        if ($LASTEXITCODE -ne 0) { throw "Download failed: $name" }
+function Get-Archive([string]$Url, [string]$Name, [string]$Destination, [string]$Checksum, [string]$Algorithm = 'SHA256') {
+    $archive = Join-Path $compassToolsRoot $Name
+    if (!(Test-Path -LiteralPath $archive)) {
+        Write-Host "Downloading $Name"
+        & node "$PSScriptRoot/download.cjs" $Url "$archive.partial"
+        if ($LASTEXITCODE -ne 0) { throw "Download failed: $Name. Check internet/DNS, then rerun setup." }
+        if ((Get-FileHash -LiteralPath "$archive.partial" -Algorithm $Algorithm).Hash -ne $Checksum) {
+            throw "Downloaded archive checksum mismatch: $archive.partial. The archive was not installed."
+        }
         Move-Item -LiteralPath "$archive.partial" -Destination $archive -Force
     }
-    if ($sha1) {
-        $stream = [System.IO.File]::OpenRead($archive)
-        $hasher = [System.Security.Cryptography.SHA1]::Create()
-        try { $actualHash = [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '') }
-        finally { $stream.Dispose(); $hasher.Dispose() }
-        if ($actualHash -ne $sha1) { throw "Archive checksum mismatch: $name" }
+    if ((Get-FileHash -LiteralPath $archive -Algorithm $Algorithm).Hash -ne $Checksum) {
+        throw "Archive checksum mismatch: $archive. Remove that archive and rerun setup."
     }
-    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     if (Get-Command tar.exe -ErrorAction SilentlyContinue) {
-        & tar.exe -xf $archive -C $destination
-        if ($LASTEXITCODE -ne 0) { throw "Archive extraction failed: $name" }
+        & tar.exe -xf $archive -C $Destination
+        if ($LASTEXITCODE -ne 0) { throw "Archive extraction failed: $Name" }
     } else {
-        Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+        Expand-Archive -LiteralPath $archive -DestinationPath $Destination -Force
     }
 }
 
+if (!(Test-Path "$env:ANDROID_HOME/platform-tools/adb.exe")) {
+    # Stable Windows package and checksum from Google's SDK repository feed.
+    Get-Archive 'https://dl.google.com/android/repository/platform-tools_r37.0.1-win.zip' 'platform-tools_r37.0.1-win.zip' $env:ANDROID_HOME 'e03e78b1d80b396f1c3358e31251cb31740e1110' 'SHA1'
+}
+$adb = Resolve-Adb
+& $adb version
+if ($LASTEXITCODE -ne 0) { throw 'Local ADB verification failed.' }
 if ($PlatformToolsOnly) {
-    if (!(Test-Path "$toolsRoot/android-sdk/platform-tools/adb.exe")) {
-        Get-Archive 'https://dl.google.com/android/repository/platform-tools_r37.0.1-win.zip' 'platform-tools_r37.0.1-win.zip' "$toolsRoot/android-sdk" 'e03e78b1d80b396f1c3358e31251cb31740e1110'
-    }
-    Write-Host 'ADB installed. Install apk/CompassLink.apk on your phone, then run a connect:prebuilt command.'
+    Write-Host "ADB ready: $adb"
     return
 }
 
-if (!(Test-Path "$toolsRoot/jdk")) {
-    Get-Archive 'https://aka.ms/download-jdk/microsoft-jdk-17.0.17-windows-x64.zip' 'jdk.zip' "$toolsRoot/java-extract"
-    $jdkFolder = Get-ChildItem "$toolsRoot/java-extract" -Directory | Select-Object -First 1
-    Move-Item -LiteralPath $jdkFolder.FullName -Destination "$toolsRoot/jdk"
+if (!(Test-Path "$env:JAVA_HOME/bin/javac.exe")) {
+    # Download a pinned JDK; never copy or depend on a PC installation.
+    $assets = Invoke-RestMethod 'https://api.adoptium.net/v3/assets/version/25.0.3%2B9?architecture=x64&image_type=jdk&os=windows&vendor=eclipse'
+    $package = @($assets[0].binaries)[0].package
+    if (!$package.link -or !$package.checksum) { throw 'Adoptium did not return the pinned JDK 25.0.3+9 package.' }
+    $stage = Join-Path $compassToolsRoot 'java-extract'
+    Get-Archive $package.link 'jdk-25.0.3.zip' $stage $package.checksum
+    $jdkFolder = Get-ChildItem -LiteralPath $stage -Directory | Where-Object { Test-Path "$($_.FullName)/bin/javac.exe" } | Select-Object -First 1
+    if (!$jdkFolder) { throw 'Downloaded JDK archive has no javac.exe.' }
+    New-Item -ItemType Directory -Force -Path $env:JAVA_HOME | Out-Null
+    Get-ChildItem -LiteralPath $jdkFolder.FullName -Force | Copy-Item -Destination $env:JAVA_HOME -Recurse -Force
 }
-$env:JAVA_HOME = "$toolsRoot/jdk"
-$env:ANDROID_HOME = "$toolsRoot/android-sdk"
-$env:GRADLE_USER_HOME = "$toolsRoot/gradle-cache"
-$env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
+Assert-LocalJdk
 
-if (!(Test-Path "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat")) {
-    Get-Archive 'https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip' 'android-commandline.zip' "$toolsRoot/sdk-extract"
-    New-Item -ItemType Directory -Force "$env:ANDROID_HOME/cmdline-tools" | Out-Null
-    Move-Item "$toolsRoot/sdk-extract/cmdline-tools" "$env:ANDROID_HOME/cmdline-tools/latest"
-}
-if (!(Test-Path "$toolsRoot/gradle-8.9/bin/gradle.bat")) {
-    Get-Archive 'https://services.gradle.org/distributions/gradle-8.9-bin.zip' 'gradle.zip' $toolsRoot
+# Download Gradle during setup using the same URL and checksum as the wrapper.
+# Builds use this local distribution, so they never repeat the wrapper download.
+$gradle = Get-GradleDistribution
+if (!(Test-Path -LiteralPath $gradle.Executable -PathType Leaf)) {
+    Get-Archive $gradle.Url $gradle.Name $compassToolsRoot $gradle.Checksum
 }
 
-$sdkmanager = "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
-# Installing the requested Android SDK requires accepting its tool licenses.
-if (!(Test-Path "$env:ANDROID_HOME/licenses/android-sdk-license")) {
-    1..30 | ForEach-Object { 'y' } | & $sdkmanager "--sdk_root=$env:ANDROID_HOME" --licenses > "$toolsRoot/sdk-licenses.log"
-    if ($LASTEXITCODE -ne 0) { throw 'Android SDK license step failed' }
+if (!(Test-Path "$env:ANDROID_HOME/cmdline-tools/latest/bin/android.exe")) {
+    # Google's current stable command-line tools, verified against the published checksum.
+    [xml]$feed = (Invoke-WebRequest -UseBasicParsing 'https://dl.google.com/android/repository/repository2-1.xml').Content
+    $archive = Get-AndroidCommandLineArchive $feed
+    $stage = Join-Path $compassToolsRoot 'sdk-extract'
+    Get-Archive $archive.Url $archive.Name $stage $archive.Checksum $archive.Algorithm
+    $destination = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest'
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    Get-ChildItem -LiteralPath "$stage/cmdline-tools" -Force | Copy-Item -Destination $destination -Recurse -Force
 }
-# Pinned stable archives and SHA-1 checksums from Google's repository2-1.xml.
-# Direct range downloads avoid slow single-connection sdkmanager transfers.
-function Install-SdkPackage($archiveName, $relativeTarget, $sha1) {
-    $target = Join-Path $env:ANDROID_HOME $relativeTarget
-    if (Test-Path "$target/source.properties") { return }
-    $stage = Join-Path $toolsRoot "sdk-packages/$archiveName"
-    Get-Archive "https://dl.google.com/android/repository/$archiveName" $archiveName $stage $sha1
-    $root = Get-ChildItem -LiteralPath $stage -Directory | Select-Object -First 1
-    New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
-    if (!(Test-Path -LiteralPath $target)) {
-        Move-Item -LiteralPath $root.FullName -Destination $target
-    } else {
-        Get-ChildItem -LiteralPath $root.FullName -Force | Copy-Item -Destination $target -Recurse -Force
-    }
-}
-Install-SdkPackage 'build-tools_r34-windows.zip' 'build-tools/34.0.0' '62cfde1b6fcc3ad12a4d2ba1b537e752768bfd47'
-Install-SdkPackage 'platform-35_r02.zip' 'platforms/android-35' '0bb560a90a7a2cbd0dd8348224d518b638fe7949'
-Install-SdkPackage 'platform-tools_r37.0.1-win.zip' 'platform-tools' 'e03e78b1d80b396f1c3358e31251cb31740e1110'
-& $sdkmanager "--sdk_root=$env:ANDROID_HOME" --list_installed
-if ($LASTEXITCODE -ne 0) { throw 'Android SDK verification failed' }
-$sdkPath = $env:ANDROID_HOME.Replace('\', '/')
-Set-Content -LiteralPath "$projectRoot/android/local.properties" -Value "sdk.dir=$sdkPath" -Encoding ASCII
-if (!(Test-Path "$projectRoot/android/gradlew.bat")) {
-    & "$toolsRoot/gradle-8.9/bin/gradle.bat" -p "$projectRoot/android" --no-daemon wrapper --gradle-version 8.9 --distribution-type bin --no-validate-url
-    if ($LASTEXITCODE -ne 0) { throw 'Gradle wrapper creation failed' }
-}
-Write-Host 'Android tools installed. Run npm run build:android next.'
+# Android CLI manages SDK terms during installation; sdkmanager --licenses is
+# deprecated and no longer needed. Its launcher/runtime stay in ANDROID_USER_HOME.
+Install-RequiredAndroidSdkPackages
+Initialize-AndroidBuild
+Write-Host "JDK ready: $env:JAVA_HOME"
+Write-Host "Android SDK ready: $env:ANDROID_HOME"
+Write-Host "Android CLI ready: $(Resolve-AndroidCli)"
+Write-Host "Gradle ready: $($gradle.Executable)"
+Write-Host "Gradle cache: $env:GRADLE_USER_HOME"
+Write-Host 'Run npm run build:android next. No system environment variables were changed.'

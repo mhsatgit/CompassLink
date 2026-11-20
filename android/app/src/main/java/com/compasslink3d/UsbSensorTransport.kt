@@ -37,7 +37,7 @@ class UsbSensorTransport(private val onStatus: (String) -> Unit) {
                     return@thread
                 } catch (_: Exception) {
                     if (running) {
-                        onStatus("Waiting for PC server and USB tunnel…")
+                        onStatus("Waiting for PC server and ADB tunnel (USB / wireless).")
                         try {
                             Thread.sleep(1000)
                         } catch (_: InterruptedException) {

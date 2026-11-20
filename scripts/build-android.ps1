@@ -1,12 +1,16 @@
+param([switch]$Check, [switch]$Stacktrace, [switch]$Info)
+
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
-$env:JAVA_HOME = "$projectRoot/.tools/jdk"
-$env:ANDROID_HOME = "$projectRoot/.tools/android-sdk"
-$env:GRADLE_USER_HOME = "$projectRoot/.tools/gradle-cache"
-if (!(Test-Path "$env:JAVA_HOME/bin/java.exe")) { throw 'Run npm run setup:android first' }
-$env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
-$gradle = "$projectRoot/.tools/gradle-8.9/bin/gradle.bat"
-if (!(Test-Path $gradle)) { $gradle = "$projectRoot/android/gradlew.bat" }
-& $gradle -p "$projectRoot/android" --no-daemon assembleDebug
+. "$PSScriptRoot/toolchain.ps1"
+Initialize-AndroidBuild
+$gradle = (Get-GradleDistribution).Executable
+$tasks = @('assembleDebug')
+if ($Check) { $tasks += @('lintDebug', 'testDebugUnitTest') }
+$diagnostics = @()
+if ($Stacktrace) { $diagnostics += '--stacktrace' }
+if ($Info) { $diagnostics += '--info' }
+Write-Host "Using repository-local Gradle: $gradle"
+& $gradle -p "$projectRoot/android" --no-daemon --console=plain @diagnostics @tasks
 if ($LASTEXITCODE -ne 0) { throw 'Android build failed' }
 Write-Host "APK: $projectRoot/android/app/build/outputs/apk/debug/app-debug.apk"

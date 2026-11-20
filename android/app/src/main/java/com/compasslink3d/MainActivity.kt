@@ -94,7 +94,11 @@ class MainActivity : Activity(), SensorEventListener {
         session.start()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         toggle.text = "Stop streaming"
-        status.text = "Connecting over USB…"
+        status.text = when (connectionMode) {
+            "usb" -> "Connecting through USB debugging."
+            "wireless" -> "Connecting through wireless debugging."
+            else -> "Connecting through ADB tunnel."
+        }
     }
 
     private fun stopStream() {
