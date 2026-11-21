@@ -15,11 +15,15 @@ import kotlin.concurrent.thread
 /** Streams the latest sensor sample and ordered controller events over one ADB reverse socket. */
 internal class UsbSensorTransport(
     private val controllerToken: String?,
+    private val profile: ControllerProfile?,
     private val onSensorStatus: (String) -> Unit,
     private val onControllerStatus: (Boolean, String) -> Unit,
 ) {
     private class ControllerLink(val socket: Socket, val protocol: ControllerProtocol) {
-        val keys = ArrayBlockingQueue<ControllerTransition>(64)
+        val digital = ArrayBlockingQueue<ControllerInput>(64)
+        val continuous = ContinuousInput()
+        @Volatile var authenticated = false
+        @Volatile var revision = 0L
     }
 
     private val latest = AtomicReference<String?>()
@@ -41,7 +45,7 @@ internal class UsbSensorTransport(
                         socket.connect(InetSocketAddress("127.0.0.1", 8765), 1500)
                         socket.tcpNoDelay = true
                         onSensorStatus("Connected through ADB tunnel (USB / wireless)")
-                        val link = controllerToken?.let { ControllerLink(socket, ControllerProtocol(it)) }
+                        val link = controllerToken?.takeIf { profile != null }?.let { ControllerLink(socket, ControllerProtocol(it)) }
                         if (link != null) replies = readReplies(link)
                         writePackets(socket.getOutputStream().bufferedWriter(Charsets.UTF_8), link)
                     } catch (_: IOException) {
@@ -66,6 +70,7 @@ internal class UsbSensorTransport(
     private fun writePackets(writer: BufferedWriter, link: ControllerLink?) {
         var nextControl = 0L
         var nextSample = 0L
+        var nextContinuous = 0L
         while (running) {
             val now = SystemClock.elapsedRealtime()
             if (now >= nextSample) {
@@ -77,13 +82,24 @@ internal class UsbSensorTransport(
                 continue
             }
             if (link.socket.isClosed) return
-            if (now >= nextControl) {
-                val ready = readyLink.get() === link
-                writer.sendLine(if (ready) link.protocol.heartbeat() else link.protocol.start())
-                nextControl = now + if (ready) 500 else 1000
+            if (link.authenticated && link.revision == 0L) {
+                val (revision, message) = link.protocol.profile(requireNotNull(profile).descriptor())
+                link.revision = revision
+                writer.sendLine(message)
             }
-            val event = link.keys.poll(20, TimeUnit.MILLISECONDS)
-            if (event != null && readyLink.get() === link) writer.sendLine(link.protocol.key(event))
+            if (now >= nextControl) {
+                val authenticated = link.authenticated
+                writer.sendLine(if (authenticated) link.protocol.heartbeat() else link.protocol.start())
+                nextControl = now + if (authenticated) 500 else 1000
+            }
+            val event = link.digital.poll(15, TimeUnit.MILLISECONDS)
+            if (readyLink.get() === link) {
+                if (event != null) writer.sendLine(link.protocol.input(event, link.revision))
+                if (now >= nextContinuous && link.digital.isEmpty()) {
+                    for (update in link.continuous.drain()) writer.sendLine(link.protocol.input(update, link.revision))
+                    nextContinuous = now + 25
+                }
+            }
         }
     }
 
@@ -99,17 +115,28 @@ internal class UsbSensorTransport(
                     if (!link.protocol.accepts(reply)) continue
                     when (reply.optString("type")) {
                         "controller.ready" -> {
+                            link.authenticated = true
+                            onControllerStatus(false, "Synchronizing the controller profile…")
+                        }
+                        "controller.profile.ready" -> {
+                            if (link.revision == 0L || reply.optLong("revision") != link.revision) continue
                             lastError = null
                             if (readyLink.compareAndSet(null, link)) {
-                                onControllerStatus(true, "Connected · Windows input engine ready")
+                                onControllerStatus(true, "Connected · Profile synchronized")
                             }
+                        }
+                        "controller.profile.error" -> {
+                            if (reply.optLong("revision") != link.revision) continue
+                            lastError = reply.optString("message", "Controller profile rejected by the PC")
+                            onControllerStatus(false, lastError)
                         }
                         "controller.error" -> {
                             val wasReady = readyLink.compareAndSet(link, null)
-                            link.keys.clear()
+                            link.digital.clear()
+                            link.continuous.clear()
                             lastError = reply.optString("message", "Windows controller unavailable")
                             onControllerStatus(false, lastError)
-                            if (wasReady) break
+                            if (wasReady || link.authenticated) break
                         }
                     }
                 }
@@ -132,12 +159,19 @@ internal class UsbSensorTransport(
         if (running) latest.set(line)
     }
 
-    fun sendKey(event: ControllerTransition) {
+    fun sendInput(event: ControllerInput) {
         val link = readyLink.get() ?: return
-        if (!link.keys.offer(event)) {
-            // Losing even one transition can leave a key held. Close and start neutral instead.
-            readyLink.compareAndSet(link, null)
-            closeSocket(link.socket)
+        if (event == ControllerInput.Neutral) {
+            link.digital.clear()
+            link.continuous.clear()
+        }
+        when (event) {
+            is ControllerInput.Digital, ControllerInput.Neutral -> if (!link.digital.offer(event)) {
+                // Losing even one transition can leave a native output held.
+                readyLink.compareAndSet(link, null)
+                closeSocket(link.socket)
+            }
+            else -> link.continuous.offer(event)
         }
     }
 

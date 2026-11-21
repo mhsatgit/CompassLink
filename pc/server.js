@@ -6,6 +6,8 @@ const path = require("node:path");
 const { createController } = require("./controller");
 const { WindowsInput } = require("./windows-input");
 const HOST = "127.0.0.1";
+const MAX_FRAME = 32768;
+const STANDARD_FRAME = 4096;
 const ASSETS = new Map([
   ["/", ["index.html", "text/html"]],
   ["/index.html", ["index.html", "text/html"]],
@@ -133,18 +135,27 @@ function createCompassServer({
       buffer += chunk;
       let newline;
       while ((newline = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newline).trim();
+        const frame = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
-        if (line.length > 4096) {
+        const size = Buffer.byteLength(frame);
+        if (size > MAX_FRAME) {
           socket.destroy();
           return;
         }
+        const line = frame.trim();
         if (!line) continue;
         let packet;
         try {
           packet = JSON.parse(line);
         } catch {
           continue;
+        }
+        if (
+          size > STANDARD_FRAME &&
+          !(packet?.version === 2 && packet.type === "controller.profile")
+        ) {
+          socket.destroy();
+          return;
         }
         if (packet && Object.hasOwn(packet, "type")) {
           if (!socket.writableEnded) controller.receive(socket, packet);
@@ -158,7 +169,7 @@ function createCompassServer({
           /* Discard malformed samples without dropping subsequent valid samples. */
         }
       }
-      if (buffer.length > 4096) socket.destroy();
+      if (Buffer.byteLength(buffer) > MAX_FRAME) socket.destroy();
     });
     socket.on("close", () => {
       clients.delete(socket);

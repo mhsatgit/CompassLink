@@ -63,6 +63,7 @@ Run the commands below from the extracted or cloned project folder. The PC dashb
 
 Choose an included APK to use with the PC dashboard:
 
+- **[CompassLink3Dv1.2.apk](apk/CompassLink3Dv1.2.apk)** includes the Snapshot 2 layout builder, custom keyboard and mouse mappings, and the built-in controller.
 - **[CompassLink3Dv1.1.apk](apk/CompassLink3Dv1.1.apk)** includes the Snapshot 1 touchscreen controller and sensor mode.
 - **[CompassLink3D.apk](apk/CompassLink3D.apk)** is the original sensor companion.
 
@@ -203,6 +204,19 @@ On later connections, omit `-Reinstall`. To guarantee connection without APK ins
 Windows limits `SendInput` to applications at the same or a lower integrity level. Some games and protected applications ignore synthetic input. Windows shares keyboard state between physical and injected input, so avoid holding the same mapped key from both sources during testing. See [the Microsoft SendInput documentation](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput).
 
 See the [Snapshot 1 implementation and test record](docs/snapshots/SNAPSHOT_01.md) for protocol details and hardware coverage.
+
+### Custom Controller Builder (Snapshot 2)
+
+Install the [Snapshot 2 prebuilt APK](apk/CompassLink3Dv1.2.apk) (`1.2-snapshot.2`, version code 3) using Method 1. For a source build, use Method 2 and pass `-Reinstall` once to the USB or wireless connection command after rebuilding.
+
+1. Open **Controller Mode → Profiles → New**. Name the profile and choose **Blank layout** or start from **Default Controller**. You can always select the built-in controller in Profiles.
+2. Tap **Add** to place a Button, D-pad, Joystick, Trigger, Slider, or Touchpad. Drag the selected control from its center, resize with **↔**, or rotate with **↻**. **Properties** provides precise numeric placement, colors, bindings, and control behavior. Use **Arrange** to order, duplicate, or delete controls and **Undo** or **Redo** to revise an edit. Swipe the toolbar sideways on smaller screens to reach more actions.
+3. Tap **Save** to keep the profile on the phone, then **Play**. Wait for **Profile synchronized** on the phone. The dashboard's **Motion Control** card shows the current profile and its mappings.
+4. Use **Export JSON** and **Import JSON** in Profiles to share layouts through Android's document picker. The profile library also supports renaming, duplication, and deletion.
+
+Buttons and directions support keyboard keys, modifier combinations, and mouse buttons. The Touchpad supports relative pointer movement and optional tap-to-click. The Slider can scroll or hold an input over an activation range. Gamepad bindings are marked as reserved for Snapshot 3.
+
+See the [Snapshot 2 schema, protocol, and test record](docs/snapshots/SNAPSHOT_02.md).
 
 ### Connection Command Options
 

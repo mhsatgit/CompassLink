@@ -158,6 +158,9 @@ canvas {
   font-weight: 700;
   color: var(--cyan);
 }
+.controller-error {
+  color: var(--red);
+}
 .bottom {
   display: grid;
   grid-template-columns: 1fr 1fr;

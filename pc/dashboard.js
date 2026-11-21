@@ -183,6 +183,7 @@ const controlLabels = {
   ACTION_B: "Action B",
 };
 const keyLabels = { SPACE: "Space", ESCAPE: "Escape" };
+let renderedMappings = null;
 
 function renderController(controller, connected) {
   const link =
@@ -192,6 +193,20 @@ function renderController(controller, connected) {
     controller?.active ? `Controller active · ${link}` : "Controller off",
   );
   field("controller-engine", controller?.engineMessage ?? "Server unavailable");
+  field("controller-profile", controller?.profile?.name ?? "—");
+  document.getElementById("controller-profile").title =
+    controller?.profile?.id ?? "";
+  field(
+    "controller-sync",
+    controller?.synchronized
+      ? `Synchronized · ${controller.profile.controls} controls`
+      : controller?.active
+        ? "Waiting for profile"
+        : "Waiting for controller",
+  );
+  field("controller-error", controller?.profileError ?? "");
+  document.getElementById("controller-error").hidden =
+    !controller?.profileError;
   const held = controller?.held ?? [];
   field(
     "controller-activity",
@@ -199,33 +214,61 @@ function renderController(controller, connected) {
       ? "Server unavailable"
       : controller.active
         ? held.length
-          ? held.map(({ key }) => keyLabels[key] ?? key).join(" + ") + " held"
-          : "Ready for input"
+          ? `${held.length} held · ${held.map(({ key }) => keyLabels[key] ?? key).join(", ")}`
+          : controller.synchronized
+            ? "Ready for input"
+            : "Input paused"
         : connected
           ? "Open Controller Mode on your phone"
           : "Waiting for phone",
   );
-  if (controller && !controllerControls.hasChildNodes()) {
-    for (const [control, key] of Object.entries(controller.mappings)) {
+  const currentMappings = controller
+    ? `${controller.protocolVersion}:${controller.mappingRevision}`
+    : null;
+  if (currentMappings !== renderedMappings) {
+    renderedMappings = currentMappings;
+    controllerControls.replaceChildren();
+    const entries =
+      controller?.protocolVersion === 2
+        ? controller.controls.flatMap(({ id, label, bindings }) =>
+            bindings.map(({ slot, action }) => ({
+              id,
+              slot,
+              label: ["press", "pointer"].includes(slot)
+                ? label
+                : `${label} · ${slot}`,
+              key: action,
+            })),
+          )
+        : Object.entries(controller?.mappings ?? {}).map(([id, key]) => ({
+            id,
+            label: controlLabels[id],
+            key,
+          }));
+    for (const { id, slot, label, key } of entries) {
       const item = document.createElement("li");
-      item.dataset.control = control;
+      item.dataset.control = id;
+      if (slot) item.dataset.slot = slot;
       const keycap = document.createElement("kbd");
       keycap.textContent = keyLabels[key] ?? key;
-      item.append(controlLabels[control], keycap);
+      item.append(label, keycap);
       controllerControls.append(item);
     }
   }
   for (const item of controllerControls.children) {
     item.classList.toggle(
       "held",
-      held.some(({ control }) => control === item.dataset.control),
+      held.some(
+        ({ control, slot }) =>
+          control === item.dataset.control && slot === item.dataset.slot,
+      ),
     );
   }
   const event = controller?.lastEvent;
   field(
     "controller-last",
     event
-      ? `Last event · ${controlLabels[event.control]} · ${keyLabels[event.key] ?? event.key} ${event.action.toLowerCase()}`
+      ? `Last event · ${event.label ?? controlLabels[event.control] ?? event.control} · ${keyLabels[event.key] ?? event.key} ${event.action.toLowerCase()}`
       : "No controller events",
   );
 }

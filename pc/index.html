@@ -82,6 +82,14 @@
         </div>
         <div class="stats">
           <div class="stat">
+            <div class="label">Active profile</div>
+            <div class="value" id="controller-profile">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Layout synchronization</div>
+            <div class="value" id="controller-sync">Waiting for controller</div>
+          </div>
+          <div class="stat">
             <div class="label">Windows input engine</div>
             <div class="value" id="controller-engine">Checking engine</div>
           </div>
@@ -93,6 +101,7 @@
             <div class="label">Controller mappings</div>
             <ul id="controller-controls" class="controller-controls"></ul>
             <div class="hint" id="controller-last">No controller events</div>
+            <p class="hint controller-error" id="controller-error" hidden></p>
           </div>
         </div>
       </section>
