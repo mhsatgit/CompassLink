@@ -3,17 +3,22 @@ package com.compasslink3d
 import android.app.Dialog
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Shader
 import android.graphics.Paint
 import android.graphics.Path
 import android.view.Gravity
 import android.view.View
+import android.view.MotionEvent
+import android.view.VelocityTracker
+import android.view.ViewConfiguration
 import android.view.Window
 import android.widget.LinearLayout
+import android.widget.FrameLayout
 import android.widget.ScrollView
+import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 internal enum class Destination(val title: String, val icon: Int) {
     CONNECT("Connect", R.drawable.ic_controller_signal),
@@ -22,35 +27,59 @@ internal enum class Destination(val title: String, val icon: Int) {
 }
 
 internal fun Context.navigationShell(active: Destination, body: View, navigate: (Destination) -> Unit): View {
+    val preferences = getSharedPreferences("workspace", Context.MODE_PRIVATE)
+    var collapsed = preferences.getBoolean("compact_rail", false)
     fun navigation(rail: Boolean) = LinearLayout(this).apply {
         orientation = if (rail) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        gravity = if (rail) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
         for (next in Destination.entries) {
-            val action = builderButton(next.title, active == next, next.icon) {
-                if (next != active) navigate(next)
-            }.apply { isSelected = active == next }
+            val select = { if (next != active) navigate(next) }
+            val action = if (rail && collapsed) iconButton(next.title, next.icon, select)
+                else builderButton(next.title, icon = next.icon, click = select)
+            action.isSelected = active == next
             val params = if (rail) LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(6) }
                 else LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = px(3) }
             addView(action, params)
         }
     }
 
-    val rail = navigation(true)
+    val rail = builderRoot()
+    fun renderRail() {
+        rail.removeAllViews()
+        rail.addView(iconButton(if (collapsed) "Expand navigation" else "Minimize navigation",
+            R.drawable.ic_controller_menu) {
+            collapsed = !collapsed
+            preferences.edit().putBoolean("compact_rail", collapsed).apply()
+            renderRail()
+        }, LinearLayout.LayoutParams(px(48), px(48)).apply { bottomMargin = px(8) })
+        rail.addView(navigation(true), LinearLayout.LayoutParams(-1, -2))
+        rail.requestLayout()
+    }
+    renderRail()
+
     val bottom = navigation(false)
     val column = builderRoot().apply {
         addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         addView(bottom, LinearLayout.LayoutParams(-1, -2))
     }
+    val railScroll = ScrollView(this).apply {
+        isVerticalScrollBarEnabled = false
+        addView(rail, LinearLayout.LayoutParams(-1, -2))
+    }
     return object : LinearLayout(this) {
         init {
             orientation = HORIZONTAL
             setBackgroundColor(CANVAS_BACKGROUND)
-            addView(rail, LayoutParams(px(134), -1).apply { marginEnd = px(12) })
+            addView(railScroll, LayoutParams(px(if (collapsed) 52 else 144), -1).apply { marginEnd = px(10) })
             addView(column, LayoutParams(0, -1, 1f))
         }
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            val wide = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight >= px(640)
-            rail.visibility = if (wide) VISIBLE else GONE
+            val w = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+            val h = MeasureSpec.getSize(heightMeasureSpec) - paddingTop - paddingBottom
+            val wide = w >= px(640) || w >= px(480) && w > h
+            railScroll.visibility = if (wide) VISIBLE else GONE
+            railScroll.layoutParams.width = px(if (collapsed) 52 else 144)
             bottom.visibility = if (wide) GONE else VISIBLE
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         }
@@ -76,7 +105,7 @@ internal fun Context.selectionSheet(title: String, onBack: (() -> Unit)? = null,
     dialog.escapeDismisses()
     dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
     val rows = builderRoot().apply {
-        background = roundedSurface(0xFF182338.toInt(), 22)
+        background = angularSurface(PANEL_COLOR, CONTROL_OUTLINE)
         setPadding(px(18), px(16), px(18), px(16))
         addView(controllerHeader(heading(title), "Close", dialog::cancel))
     }
@@ -108,32 +137,133 @@ internal fun Context.controlPicker(types: List<ControlType>, selected: (ControlT
     }
 }
 
-internal class LayoutPreview(context: Context) : View(context) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+internal class LayoutPreview(context: Context) : FrameLayout(context) {
+    private val miniature = ControllerCanvas(context, editing = false, miniature = true)
     var profile: ControllerProfile? = null
-        set(value) { field = value; invalidate() }
-
-    override fun onDraw(canvas: Canvas) {
-        val layout = profile ?: return
-        val aspect = if (layout.orientation == ProfileOrientation.LANDSCAPE) 1.9f else .65f
-        val w = min(width.toFloat(), height * aspect)
-        val h = w / aspect
-        canvas.translate((width - w) / 2, (height - h) / 2)
-        paint.color = CANVAS_BACKGROUND
-        canvas.drawRoundRect(0f, 0f, w, h, 8f, 8f, paint)
-        for (control in layout.controls.filter { it.style.visible && it.type != ControlType.TOUCH_LOOK }) {
-            val g = control.geometry
-            val x = (g.x * w).toFloat()
-            val y = (g.y * h).toFloat()
-            val dx = (g.width * w / 2).toFloat()
-            val dy = (g.height * h / 2).toFloat()
-            paint.color = Color.parseColor(control.style.border)
-            canvas.save()
-            canvas.rotate(g.rotation.toFloat(), x, y)
-            if (control.round) canvas.drawCircle(x, y, min(dx,dy), paint)
-            else canvas.drawRoundRect(x-dx, y-dy, x+dx, y+dy, 3f, 3f, paint)
-            canvas.restore()
+        set(value) {
+            field = value
+            miniature.originalAppearance = value?.let { !it.builtIn && it.hybrid?.originalAppearance == true } == true
+            miniature.render(value?.controls.orEmpty())
+            contentDescription = value?.let { "${it.orientation.title} layout preview of ${it.name}" }
+            requestLayout()
         }
+
+    init {
+        background = context.angularSurface(PANEL_COLOR, CANVAS_ACCENT)
+        setPadding(context.px(3), context.px(3), context.px(3), context.px(3))
+        addView(miniature.apply { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }, LayoutParams(-1, -1))
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val h = MeasureSpec.getSize(heightMeasureSpec)
+        val display = resources.displayMetrics
+        val longSide = maxOf(display.widthPixels, display.heightPixels).coerceAtLeast(1)
+        val shortSide = minOf(display.widthPixels, display.heightPixels).coerceAtLeast(1)
+        val aspect = if (profile?.orientation == ProfileOrientation.PORTRAIT) shortSide.toFloat() / longSide
+            else longSide.toFloat() / shortSide
+        val fittedWidth = min(w - paddingLeft - paddingRight, ((h - paddingTop - paddingBottom) * aspect).roundToInt()).coerceAtLeast(0)
+        val fittedHeight = (fittedWidth / aspect).roundToInt()
+        miniature.measure(MeasureSpec.makeMeasureSpec(fittedWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(fittedHeight, MeasureSpec.EXACTLY))
+        setMeasuredDimension(w, h)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        val x = (width - miniature.measuredWidth) / 2
+        val y = (height - miniature.measuredHeight) / 2
+        miniature.layout(x, y, x + miniature.measuredWidth, y + miniature.measuredHeight)
+    }
+}
+
+/** A preview with a persistent grab handle and a bounded, finger-driven height. */
+internal class PreviewDrawer(context: Context, preview: LayoutPreview) : LinearLayout(context) {
+    private data class Drag(val y: Float, val height: Int, val velocity: VelocityTracker, var moved: Boolean = false)
+    private var drag: Drag? = null
+    private var maximum = context.px(172)
+    private var expanded = true
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
+    private val minVelocity = ViewConfiguration.get(context).scaledMinimumFlingVelocity * 4
+    private val handle = object : FrameLayout(context) {
+        override fun performClick() = super.performClick()
+    }.apply {
+        isFocusable = true
+        setOnClickListener { settle(!expanded) }
+        addView(View(context).apply {
+            background = context.roundedSurface(CANVAS_TEXT, 2)
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, FrameLayout.LayoutParams(context.px(36), context.px(3), Gravity.CENTER))
+    }
+    private val area = preview
+    val contentHeight: Int get() = area.layoutParams.height
+
+    init {
+        orientation = VERTICAL
+        addView(handle, LayoutParams(-1, context.px(48)))
+        addView(area, LayoutParams(-1, maximum))
+        settle(true)
+        handle.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    drag?.velocity?.recycle()
+                    drag = Drag(event.rawY, area.layoutParams.height, VelocityTracker.obtain())
+                    drag?.velocity?.trackScreenPosition(event)
+                }
+                MotionEvent.ACTION_MOVE -> drag?.let {
+                    it.velocity.trackScreenPosition(event)
+                    val dy = (event.rawY - it.y).roundToInt()
+                    it.moved = it.moved || abs(dy) > slop
+                    if (it.moved) resize((it.height - dy).coerceIn(0, maximum))
+                }
+                MotionEvent.ACTION_UP -> drag?.let {
+                    it.velocity.trackScreenPosition(event)
+                    it.velocity.computeCurrentVelocity(1000)
+                    val velocity = it.velocity.yVelocity
+                    if (!it.moved) handle.performClick()
+                    else settle(if (abs(velocity) > minVelocity) velocity < 0 else area.layoutParams.height * 2 >= maximum)
+                    endDrag()
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    settle(expanded)
+                    endDrag()
+                }
+            }
+            true
+        }
+    }
+
+    fun boundHeight(height: Int) {
+        val next = height.coerceIn(context.px(110), context.px(210))
+        if (next != maximum) {
+            maximum = next
+            if (drag == null) settle(expanded)
+        }
+    }
+
+    private fun VelocityTracker.trackScreenPosition(event: MotionEvent) {
+        val copy = MotionEvent.obtain(event)
+        copy.offsetLocation(event.rawX - event.x, event.rawY - event.y)
+        addMovement(copy)
+        copy.recycle()
+    }
+
+    private fun endDrag() {
+        drag?.velocity?.recycle()
+        drag = null
+        parent?.requestDisallowInterceptTouchEvent(false)
+    }
+
+    private fun resize(height: Int) {
+        if (area.layoutParams.height == height) return
+        area.layoutParams = LayoutParams(-1, height)
+        area.visibility = if (height == 0) GONE else VISIBLE
+    }
+
+    private fun settle(open: Boolean) {
+        expanded = open
+        resize(if (open) maximum else 0)
+        handle.contentDescription = if (open) "Hide controller preview" else "Show controller preview"
     }
 }
 
@@ -141,41 +271,47 @@ internal class OrientationGauge(context: Context) : View(context) {
     private val pen = Paint(Paint.ANTI_ALIAS_FLAG)
     private val needle = Path()
     private var heading: Float? = null
-    fun pose(q: MotionQuaternion?) {
-        heading = q?.let {
-            val east = 2 * (it.x * it.y - it.z * it.w)
-            val north = 1 - 2 * (it.x * it.x + it.z * it.z)
-            if (kotlin.math.hypot(east, north) <= 1e-5) null else Math.toDegrees(kotlin.math.atan2(east, north)).toFloat()
-        }
-        contentDescription = heading?.let { "Heading ${String.format(java.util.Locale.getDefault(), "%.0f", (it + 360) % 360)} degrees" }
-            ?: "Heading unavailable"
+    private var stale = false
+    private var rotation = 0
+    fun pose(q: MotionQuaternion?, lastKnown: Boolean = false) {
+        val value = q?.headingDegrees()?.toFloat()
+        val currentRotation = display?.rotation ?: 0
+        if (value == heading && stale == lastKnown && rotation == currentRotation && contentDescription != null) return
+        heading = value
+        stale = lastKnown
+        rotation = currentRotation
+        contentDescription = value?.let {
+            "${if (lastKnown) "Last known heading" else "Heading"} ${it.roundToInt() % 360} degrees"
+        } ?: "Heading unavailable"
         invalidate()
     }
     override fun onDraw(canvas: Canvas) {
         val radius = min(width, height) * .40f
         canvas.translate(width / 2f, height / 2f)
-        pen.color = 0xFF182338.toInt()
+        pen.color = PANEL_COLOR
         canvas.drawCircle(0f, 0f, radius, pen)
-        pen.color = 0xFFADC0DD.toInt()
+        pen.color = MUTED_TEXT
         repeat(24) { canvas.drawLine(0f, -radius, 0f, -radius * .92f, pen); canvas.rotate(15f) }
-        canvas.rotate(heading ?: return)
-        pen.color = CANVAS_ACCENT
+        canvas.rotate((heading ?: return) - rotation * 90f)
+        pen.color = if (stale) MUTED_TEXT else CANVAS_ACCENT
         canvas.drawPath(needle.apply { rewind(); moveTo(0f, -radius*.83f); lineTo(radius*.19f, radius*.35f)
             lineTo(0f, radius*.16f); lineTo(-radius*.19f, radius*.35f); close() }, pen)
     }
 }
 
-/** A diagram of the active transport. Dashes indicate a link that has not been verified. */
+internal enum class ReceiverState { UNCHECKED, CHECKING, REACHABLE, UNREACHABLE }
+
+/** A diagram of receiver reachability, independent of the controller session. */
 internal class LinkDiagram(context: Context) : View(context) {
     private val pen = Paint(Paint.ANTI_ALIAS_FLAG)
     private var surface: LinearGradient? = null
     private val dashed = android.graphics.DashPathEffect(floatArrayOf(8f, 8f), 0f)
-    var verified = false
+    var state = ReceiverState.UNCHECKED
         set(value) { field = value; invalidate() }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         if (w > 0) surface = LinearGradient(0f, 0f, w.toFloat(), h.toFloat(),
-            0xff152840.toInt(), 0xff30294c.toInt(), Shader.TileMode.CLAMP)
+            PANEL_COLOR, SELECTED_SURFACE, Shader.TileMode.CLAMP)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -192,10 +328,10 @@ internal class LinkDiagram(context: Context) : View(context) {
         pen.color = CANVAS_ACCENT
         canvas.drawRoundRect(-112f, -27f, -84f, 27f, 5f, 5f, pen)
         canvas.drawLine(-104f, 21f, -92f, 21f, pen)
-        pen.pathEffect = if (verified) null else dashed
+        pen.pathEffect = if (state == ReceiverState.REACHABLE) null else dashed
         canvas.drawLine(-74f, 0f, 60f, 0f, pen)
         pen.pathEffect = null
-        pen.color = 0xffbaa2ff.toInt()
+        pen.color = CANVAS_TEXT
         canvas.drawRoundRect(68f, -23f, 123f, 14f, 4f, 4f, pen)
         canvas.drawLine(95f, 14f, 95f, 24f, pen)
         canvas.drawLine(82f, 24f, 108f, 24f, pen)

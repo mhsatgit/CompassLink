@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const net = require("node:net");
 const http = require("node:http");
 const { once } = require("node:events");
+const readline = require("node:readline");
 const { createCompassServer, parsePacket } = require("../pc/server.js");
 const { WindowsGamepad } = require("../pc/gamepad/windows-gamepad");
 
@@ -66,6 +67,73 @@ test("link check confirms the desktop receiver without opening an input session"
     socket.destroy();
     await app.close();
   }
+});
+
+test("dashboard binding capture is same-origin, one-shot, authenticated, and does not emit input", async (t) => {
+  const token = "a".repeat(64);
+  let authorization = { token, mode: "usb" };
+  const app = createCompassServer({
+    httpPort: 0,
+    sensorPort: 0,
+    readAuthorization: () => authorization,
+    gamepad: new WindowsGamepad({ supported: false }),
+  });
+  const { httpPort, sensorPort } = await app.start();
+  t.after(() => app.close());
+  const origin = `http://127.0.0.1:${httpPort}`;
+  const post = (code, binding, from = origin) =>
+    fetch(`${origin}/input-capture`, {
+      method: "POST",
+      headers: { Origin: from, "Content-Type": "application/json" },
+      body: JSON.stringify({ code, binding }),
+    });
+  const open = async (grant, code) => {
+    const socket = net.createConnection(sensorPort, "127.0.0.1");
+    socket.on("error", () => {});
+    await once(socket, "connect");
+    const iterator = readline
+      .createInterface({ input: socket })
+      [Symbol.asyncIterator]();
+    socket.write(
+      JSON.stringify({
+        type: "capture.listen",
+        version: 1,
+        mode: "usb",
+        token: grant,
+        code,
+      }) + "\n",
+    );
+    return {
+      socket,
+      next: async () => JSON.parse((await iterator.next()).value),
+    };
+  };
+  const code = "1234ABCD";
+  const invalid = await open("b".repeat(64), code);
+  assert.equal((await invalid.next()).type, "capture.unavailable");
+  const phone = await open(token, code);
+  assert.equal((await phone.next()).type, "capture.ready");
+  const binding = { type: "KEYBOARD", key: "A", modifiers: ["CTRL"] };
+  assert.equal(
+    (await post(code, binding, "http://example.invalid")).status,
+    403,
+  );
+  assert.equal((await post("00000000", binding)).status, 404);
+  assert.equal(
+    (await post(code, { ...binding, key: "UNSUPPORTED" })).status,
+    400,
+  );
+  assert.equal((await post(code, binding)).status, 204);
+  assert.deepEqual(await phone.next(), { type: "capture.binding", binding });
+  assert.equal((await post(code, binding)).status, 404);
+  const expired = await open(token, code);
+  assert.equal((await expired.next()).type, "capture.ready");
+  authorization = { token: "c".repeat(64), mode: "usb" };
+  assert.equal((await post(code, binding)).status, 404);
+  expired.socket.destroy();
+  const state = await (await fetch(`${origin}/api/state`)).json();
+  assert.equal(state.controller.active, false);
+  assert.ok(!JSON.stringify(state).includes(token));
 });
 
 test("orientation and armed secondary gyro arrive as independent mappings", () => {
@@ -141,6 +209,9 @@ test("motion diagnostics are bounded and remain display-only", async () => {
     assert.equal(data.motion.sensors.gameRotation.hz, 47.5);
     assert.equal(data.count, 0);
     assert.equal(data.last, null);
+    assert.equal(data.stale, true);
+    assert.equal(data.motion.stale, false);
+    assert.equal(data.motion.gyroEnabled, true);
     assert.equal(data.controller.active, false);
     assert.equal(JSON.stringify(data).includes(grant), false);
     const closed = once(socket, "close");

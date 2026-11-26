@@ -15,11 +15,12 @@
     <string name="start_streaming">Start streaming</string>
     <string name="stop_streaming">Stop streaming</string>
     <string name="streaming_stopped">Stopped</string>
-    <string name="controller_mode">Controller Mode</string>
     <string name="unsaved_profile_title">%1$s *</string>
-    <string name="editor_tools_hint">Press Back or Escape to open editor tools</string>
-    <string name="profile_details">%1$s · %2$s</string>
-    <string name="built_in_profile_details">%1$s · %2$s · Built-in</string>
+    <string name="stream_interrupted">Streaming interrupted. Tap Start streaming to resume.</string>
+    <string name="checking_receiver">Checking the PC receiver…</string>
+    <string name="capture_invalid_mouse_slot">This slot accepts a mouse button. Cancel and reopen to try PC capture again.</string>
+    <string name="capture_unsupported_key">Unsupported key. Try another key or choose it manually.</string>
+    <string name="capture_expired">PC capture expired or the receiver is unavailable. Reopen capture to get a new code.</string>
     <plurals name="profile_control_count">
         <item quantity="one">%d control</item>
         <item quantity="other">%d controls</item>

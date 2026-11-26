@@ -297,4 +297,10 @@ function describeBinding(binding) {
   return binding.type === "POINTER" ? "Mouse movement" : "Mouse wheel";
 }
 
-module.exports = { ID, validateProfile, outputsFor, describeBinding };
+module.exports = {
+  ID,
+  validateProfile,
+  outputsFor,
+  describeBinding,
+  parseBinding,
+};

@@ -7,6 +7,7 @@ const { createController } = require("./controller");
 const { WindowsInput } = require("./windows-input");
 const { WindowsGamepad } = require("./gamepad/windows-gamepad");
 const { normalizeQuaternion, parseMotion } = require("./motion-diagnostics");
+const { createInputCapture } = require("./input-capture");
 const HOST = "127.0.0.1";
 const MAX_FRAME = 32768;
 const STANDARD_FRAME = 4096;
@@ -26,6 +27,7 @@ const ASSETS = new Map([
   ["/index.html", ["index.html", "text/html"]],
   ["/styles.css", ["styles.css", "text/css"]],
   ["/dashboard.js", ["dashboard.js", "text/javascript"]],
+  ["/binding-ui.js", ["binding-ui.js", "text/javascript"]],
   ["/orientation.js", ["orientation.js", "text/javascript"]],
 ]);
 
@@ -93,6 +95,7 @@ function createCompassServer({
     timeoutMs: controllerTimeoutMs,
   });
   const clients = new Set();
+  const captures = createInputCapture(readAuthorization);
   const web = http.createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Security-Policy", CONTENT_POLICY);
@@ -108,6 +111,10 @@ function createCompassServer({
       return;
     }
     const pathname = req.url.split("?", 1)[0];
+    if (pathname === "/input-capture" && req.method === "POST") {
+      await captures.submitCapture(req, res, host);
+      return;
+    }
     if (req.method !== "GET") {
       res.writeHead(405, { Allow: "GET" }).end();
       return;
@@ -155,9 +162,14 @@ function createCompassServer({
     socket.setNoDelay(true);
     socket.setTimeout(10000, () => socket.destroy());
     let buffer = "";
+    let captureOnly = false;
     let allowance = FRAME_BURST;
     let updatedAt = performance.now();
     socket.on("data", (chunk) => {
+      if (captureOnly) {
+        socket.destroy();
+        return;
+      }
       const now = performance.now();
       allowance = Math.min(FRAME_BURST, allowance + (now - updatedAt));
       updatedAt = now;
@@ -196,6 +208,11 @@ function createCompassServer({
         }
         if (packet?.type === "link.check" && packet.version === 1) {
           socket.end('{"type":"link.ready","version":1}\n');
+          return;
+        }
+        if (packet?.type === "capture.listen") {
+          captureOnly = true;
+          captures.offerCapture(socket, packet);
           return;
         }
         if (packet && Object.hasOwn(packet, "type")) {

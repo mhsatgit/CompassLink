@@ -14,6 +14,15 @@ private const val MAX_DELTA = .1
 private val ZERO = LayoutPoint(0.0, 0.0)
 
 internal data class MotionQuaternion(val x: Double, val y: Double, val z: Double, val w: Double) {
+    /** Android azimuth in natural device coordinates, matching the desktop orientation model. */
+    fun headingDegrees(): Double? {
+        val q = normalized() ?: return null
+        val east = 2 * (q.x * q.y - q.z * q.w)
+        val north = 1 - 2 * (q.x * q.x + q.z * q.z)
+        if (kotlin.math.hypot(east, north) <= 1e-5) return null
+        return (Math.toDegrees(kotlin.math.atan2(east, north)) + 360) % 360
+    }
+
     fun normalized(): MotionQuaternion? {
         val norm = sqrt(dot(this))
         return if (norm.isFinite() && norm > 1e-6) MotionQuaternion(x / norm, y / norm, z / norm, w / norm) else null

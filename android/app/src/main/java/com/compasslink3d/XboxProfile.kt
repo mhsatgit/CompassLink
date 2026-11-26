@@ -1,9 +1,9 @@
 package com.compasslink3d
 
-private fun xboxButton(target: String, x: Double, y: Double, color: String? = null): LayoutControl =
+private fun xboxButton(target: String, x: Double, y: Double, round: Boolean = false): LayoutControl =
     LayoutControl(target, ControlType.BUTTON, target,
-        ControlGeometry(x, y, .11, if (color == null) .16 else .21),
-        if (color == null) ControlStyle() else ControlStyle(border = color, text = color, shape = ControlShape.CIRCLE),
+        ControlGeometry(x, y, .11, if (round) .21 else .16),
+        ControlStyle(shape = if (round) ControlShape.CIRCLE else ControlShape.ROUNDED_RECTANGLE),
         mapOf(Slot.PRESS to Binding(BindingType.GAMEPAD, target)))
 
 private fun xboxAxis(target: String, type: ControlType, label: String, x: Double, y: Double): LayoutControl =
@@ -27,10 +27,10 @@ internal val XBOX_PROFILE = ControllerProfile("builtin-xbox", "Xbox Controller",
         ControlStyle(), mapOf(Slot.AXIS to Binding(BindingType.GAMEPAD_AXIS, "RIGHT_STICK"))),
     xboxButton("L3", .18, .90),
     xboxButton("R3", .60, .93),
-    xboxButton("Y", .84, .34, "#F5CC5C"),
-    xboxButton("X", .74, .55, "#75BEFF"),
-    xboxButton("B", .94, .55, "#FF8784"),
-    xboxButton("A", .84, .76, "#A0E681"),
+    xboxButton("Y", .84, .34, round = true),
+    xboxButton("X", .74, .55, round = true),
+    xboxButton("B", .94, .55, round = true),
+    xboxButton("A", .84, .76, round = true),
 ))
 
 internal val BUILT_IN_PROFILES = listOf(DEFAULT_PROFILE, XBOX_PROFILE, TILT_RACING_PROFILE) + HYBRID_TEMPLATES

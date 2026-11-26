@@ -58,10 +58,8 @@ internal static class Program
         while (!stop.IsCancellationRequested)
         {
             using var pipe = LocalPipe.Open(owner);
-            using var idle = CancellationTokenSource.CreateLinkedTokenSource(stop);
-            idle.CancelAfter(TimeSpan.FromSeconds(90));
-            try { await pipe.WaitForConnectionAsync(idle.Token); }
-            catch (OperationCanceledException) { break; }
+            try { await pipe.WaitForConnectionAsync(stop); }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
             try { await Serve(pipe, context, profile, stop); }
             catch (EndOfStreamException) { }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }

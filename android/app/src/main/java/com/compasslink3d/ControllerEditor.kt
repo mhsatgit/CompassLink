@@ -20,6 +20,7 @@ internal class ControllerEditor(
     unsaved: Boolean = false,
     private val availableProfiles: () -> List<ControllerProfile> = { emptyList() },
     savedProfile: ControllerProfile? = null,
+    private val captureGrant: () -> ControllerGrant? = { null },
 ) {
     private val history = EditorHistory(initial)
     private var saved = savedProfile ?: initial.takeUnless { unsaved }
@@ -32,21 +33,20 @@ internal class ControllerEditor(
     private val detail = context.hint("")
     private val historyButton = context.iconButton("Undo and redo", R.drawable.ic_controller_history) { showHistory() }
     private val properties = context.iconButton("Control properties", R.drawable.ic_controller_settings) { selectedControl()?.let(::properties) }
-    private val bind = context.builderButton("Bindings", icon = R.drawable.ic_controller_signal) {
+    private val bind = context.builderButton("Input bindings", icon = R.drawable.ic_controller_signal) {
         selectedControl()?.let { if (it.type == ControlType.PROFILE_SWITCH) switchTarget(it) else bindings(it) }
     }
     private val arrange = context.iconButton("Arrange control", R.drawable.ic_controller_layers) { selectedControl()?.let(::arrange) }
     private val rename = context.builderButton("Rename", icon = R.drawable.ic_controller_edit) { selectedControl()?.let(::rename) }
-    private val add = context.builderButton("Add", highlight = true, icon = R.drawable.ic_controller_add) { add() }
+    private val add = context.iconButton("Add control", R.drawable.ic_controller_add) { add() }
     private val layout = context.iconButton("Layout settings", R.drawable.ic_controller_phone) { layoutProperties() }
+    private val orientationButton = context.iconButton("Orientation", R.drawable.ic_controller_rotate) { cycleOrientation() }
     private var renderedOrientation = initial.lockedOrientation
     var canvasOnly = true
         private set
 
     private val tools = ScrollView(context).apply {
-        isFillViewport = true
         isClickable = true
-        window.insetContent(this, 10)
         addView(context.controlPanel().apply {
             addView(context.controllerHeader(
                 title, "Done", { leave(profiles) },
@@ -55,7 +55,8 @@ internal class ControllerEditor(
                 context.iconButton("Play", R.drawable.ic_controller_play) { leave { play(history.current) } },
             ))
             addView(detail)
-            addView(context.actionRow(add, properties, arrange, layout))
+            addView(context.actionRow(add, properties, arrange))
+            addView(context.actionRow(layout, orientationButton))
             addView(context.actionRow(
                 bind,
                 rename,
@@ -66,30 +67,29 @@ internal class ControllerEditor(
     }
 
     private val pencil = context.iconButton("Open editor tools", R.drawable.ic_controller_edit) { showCanvas(false) }
+    private val resumeCanvas = View(context).apply {
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        setOnClickListener { showCanvas(true) }
+    }
+    private val portraitTools = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
+    private val landscapeTools = FrameLayout.LayoutParams(context.px(340), -2, Gravity.END or Gravity.CENTER_VERTICAL)
 
     val view: View = object : FrameLayout(context) {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val w = MeasureSpec.getSize(widthMeasureSpec)
             val h = MeasureSpec.getSize(heightMeasureSpec)
             val wide = w >= context.px(620) && w > h
-            val panelWidth = if (wide) context.px(340) else -1
-            if (tools.layoutParams.width != panelWidth) {
-                tools.layoutParams = LayoutParams(panelWidth, if (wide) -1 else -2,
-                    if (wide) Gravity.END else Gravity.BOTTOM)
-            }
+            val params = if (wide) landscapeTools else portraitTools
+            if (tools.layoutParams !== params) tools.layoutParams = params
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         }
     }.apply {
         setBackgroundColor(CANVAS_BACKGROUND)
-        addView(FrameLayout(context).apply {
-            window.insetContent(this, 0, protectSystemBars = false)
-            addView(canvas, FrameLayout.LayoutParams(-1, -1))
-        }, FrameLayout.LayoutParams(-1, -1))
-        addView(FrameLayout(context).apply {
-            window.insetContent(this, 8, protectBottom = false)
-            addView(pencil, FrameLayout.LayoutParams(context.px(48), context.px(48), Gravity.TOP or Gravity.END))
-        }, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-        addView(tools, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        window.insetContent(this, 0, protectSystemBars = false)
+        addView(canvas, FrameLayout.LayoutParams(-1, -1))
+        addMovableAction(pencil, "editor-tools")
+        addView(resumeCanvas, FrameLayout.LayoutParams(-1, -1))
+        addView(tools, portraitTools)
     }
 
     init {
@@ -103,9 +103,7 @@ internal class ControllerEditor(
         showCanvas(canvas)
     }
 
-    fun requestBack() {
-        if (canvasOnly) showCanvas(false) else leave(profiles)
-    }
+    fun requestBack() = leave(profiles)
 
     fun cancelDrag() = canvas.cancelDrag()
 
@@ -113,8 +111,9 @@ internal class ControllerEditor(
         cancelDrag()
         canvasOnly = value
         pencil.visibility = if (value) View.VISIBLE else View.GONE
+        resumeCanvas.visibility = if (value) View.GONE else View.VISIBLE
         tools.visibility = if (value) View.GONE else View.VISIBLE
-        window.immersive(value)
+        window.immersive(true)
         view.requestApplyInsets()
     }
 
@@ -173,11 +172,20 @@ internal class ControllerEditor(
         val name = history.current.name
         title.text = if (saved == history.current) name else context.getString(R.string.unsaved_profile_title, name)
         if (selectedControl() == null) selected = null
+        canvas.originalAppearance = history.current.hybrid?.originalAppearance == true
         canvas.render(history.current.controls)
         canvas.selectControl(selected)
         historyButton.isEnabled = history.canUndo || history.canRedo
         add.isEnabled = history.current.controls.size < MAX_CONTROLS
         updateDetail()
+        val policy = history.current.orientationPolicy
+        orientationButton.setImageResource(when (policy) {
+            OrientationPolicy.SYSTEM -> R.drawable.ic_controller_rotate
+            OrientationPolicy.PORTRAIT -> R.drawable.ic_controller_phone
+            OrientationPolicy.LANDSCAPE -> R.drawable.ic_controller_landscape
+        })
+        orientationButton.contentDescription = "Orientation: ${policy.title}. Tap to change."
+        orientationButton.tooltipText = policy.title
         val orientation = history.current.lockedOrientation
         if (renderedOrientation != orientation) {
             renderedOrientation = orientation
@@ -338,16 +346,23 @@ internal class ControllerEditor(
     private fun profileOptions(profile: ControllerProfile, options: HybridSettings) {
         val form = ControllerForm(context, ::layoutProperties)
         val name = form.text("Profile name", profile.name)
-        val orientation = form.choice("Orientation", OrientationPolicy.entries, options.orientation) { it.title }
         val haptics = form.choice("Touch haptics", TouchHaptics.entries, options.haptics) { it.name.lowercase().replaceFirstChar(Char::titlecase) }
         val hybrid = form.flag("Use keyboard, mouse and virtual gamepad together", options.hybrid)
+        val appearance = form.flag("Show saved control colours", options.originalAppearance)
         form.show("Profile options") {
             val title = name.value().trim()
             require(title.isNotBlank() && title.none { it.isISOControl() }) { "Enter a profile name" }
             require(hybrid.isChecked || options.secondaryMotion == null) { "Disable secondary motion before turning off hybrid output" }
-            commit(profile.copy(name = title, orientation = orientation().locked ?: profile.orientation,
-                hybrid = options.copy(hybrid = hybrid.isChecked, orientation = orientation(), haptics = haptics())))
+            commit(profile.copy(name = title, hybrid = options.copy(hybrid = hybrid.isChecked, haptics = haptics(),
+                originalAppearance = appearance.isChecked)))
         }
+    }
+
+    private fun cycleOrientation() {
+        val profile = history.current
+        val next = OrientationPolicy.entries[(profile.orientationPolicy.ordinal + 1) % OrientationPolicy.entries.size]
+        val options = profile.hybrid ?: HybridSettings(hybrid = false)
+        commit(profile.copy(orientation = next.locked ?: profile.orientation, hybrid = options.copy(orientation = next)))
     }
 
     private fun configureGyroSource(profile: ControllerProfile, options: HybridSettings) {
@@ -426,6 +441,8 @@ internal class ControllerEditor(
 
     private fun appearance(control: LayoutControl) {
         val form = ControllerForm(context) { properties(control) }
+        if (history.current.hybrid?.originalAppearance != true)
+            form.note("Your colours are saved. Turn on Show saved control colours in Profile options to display them.")
         val style = control.style
         val label = form.text("Label", control.label)
         val shapes = if (control.type == ControlType.JOYSTICK) listOf(ControlShape.CIRCLE) else ControlShape.entries
@@ -525,13 +542,15 @@ internal class ControllerEditor(
             Slot.POINTER -> listOf("Mouse movement")
             Slot.WHEEL -> listOf("Mouse wheel")
             Slot.AXIS -> listOf("Gamepad axis")
-            Slot.TAP -> listOf("Mouse button", "Gamepad button")
-            else -> listOf("Keyboard", "Mouse button", "Gamepad button")
+            Slot.TAP -> listOf("Capture keyboard or mouse", "Mouse button", "Gamepad button")
+            else -> listOf("Capture keyboard or mouse", "Keyboard", "Mouse button", "Gamepad button")
         }
         val choices = listOf("Unbound") + options
         context.choose("Bind ${slot.wire}", choices, onBack = { bindings(control) }) {
             when (choices[it]) {
                 "Unbound" -> set(null)
+                "Capture keyboard or mouse" -> context.captureBinding(keys.toSet(), slot == Slot.TAP, captureGrant(),
+                    { binding(control, slot) }, ::set)
                 "Mouse movement" -> set(Binding(BindingType.POINTER))
                 "Mouse wheel" -> set(Binding(BindingType.WHEEL))
                 "Mouse button" -> context.choose("Mouse button", MOUSE_BUTTONS, onBack = { binding(control, slot) }) { index ->

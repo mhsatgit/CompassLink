@@ -6,6 +6,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ControllerTouchTest {
+    @Test fun accessibleDirectionSharesDigitalOwnershipAndAnalogPulseReleases() {
+        val events = mutableListOf<ControllerInput>()
+        val touch = ControllerTouchEngine(1.0, events::add, OutputMode.HYBRID)
+        val dpad = newControl(ControlType.DPAD)
+        val axes = newControl(ControlType.JOYSTICK).copy(
+            bindings = mapOf(Slot.AXIS to Binding(BindingType.GAMEPAD_AXIS, "LEFT_STICK")))
+        val area = ControllerViewport(600, 400, 48.0)
+        val buttons = PhysicalControl(dpad, area.box(dpad))
+        val stick = PhysicalControl(axes, area.box(axes))
+        touch.controls = listOf(buttons)
+        val up = buttons.box.world(LayoutPoint(0.0, -buttons.box.height * .4))
+        touch.down(1, up, 0L)
+        assertTrue(touch.accessiblePress(buttons, Slot.UP, null, 1L))
+        touch.accessibleRelease(2L)
+        assertTrue(touch.active(dpad.id, Slot.UP))
+        touch.up(1, up, 3L, false)
+        assertEquals(listOf(true, false), events.filterIsInstance<ControllerInput.Digital>().map { it.down })
+        assertTrue(touch.accessiblePress(stick, Slot.RIGHT, null, 4L))
+        assertEquals(1.0, touch.value(axes.id).x, 1e-8)
+        touch.accessibleRelease(5L)
+        assertEquals(LayoutPoint(0.0, 0.0), touch.value(axes.id))
+    }
     @Test fun motionSubpixelsSurviveBetweenSamplesAndClearPerSource() {
         val reports = MotionPointerReports()
         val queue = TouchPointerQueue()

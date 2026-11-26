@@ -113,6 +113,11 @@ Tap **Stop streaming** on the phone to pause sensor updates. Press **Ctrl+C** in
 - For mouse camera control, add **Pointer and motion → Full-screen touch-look**. Start a drag outside other controls. Use separate buttons for mouse clicks and adjust sensitivity in the editor or play options.
 - In the layout settings, choose an orientation policy and optional touch haptics. Add **Switch profile** and select a target to change profiles during play. Switching releases held input and waits for the next profile to synchronize.
 - Configure motion in the editor and tap **Recenter** in Play Mode while holding the phone comfortably. Gyro aim can use a dedicated control or an existing button such as a shoulder button, with hold or toggle behavior.
+- Drag the **Pause** or editor pencil icon to move it. Play and Edit use the same cutout-safe canvas, with a small **Recenter** icon at the top during motion play. Tap outside the editor tools to return to the canvas. The orientation icon in the tools cycles through system rotation, portrait, and landscape. Paused options follow device rotation.
+- Drag the white preview handle down to collapse the preview or up to reopen it. Tapping the handle also works. In landscape, use the navigation menu to switch between labels and icons.
+- In **Input bindings**, choose a slot and select **Capture keyboard or mouse**. Press a supported key or mouse button on an input device connected to the phone, or enter the displayed code in **Capture a controller binding** on the PC dashboard. The dashboard captures one event while its capture button is focused.
+- Use **More → Export profile bundle** to include a custom profile and its switch targets in one file. **Import JSON** accepts a single profile or a bundle. The editor’s **Show saved control colours** option displays personal colours while keeping the default palette available.
+- If the library cannot be read, use **Recover saved profiles** to export its original contents or reset it after preserving a backup.
 
 | Built-in profile   | Controls                                                                       |
 | ------------------ | ------------------------------------------------------------------------------ |

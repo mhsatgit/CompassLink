@@ -30,18 +30,21 @@ import kotlin.math.roundToInt
 
 internal fun Context.px(dp: Int) = (dp * resources.displayMetrics.density + .5f).toInt()
 
-private val PANEL_COLOR = 0xFF182338.toInt()
-private val BUTTON_COLOR = 0xFF21324D.toInt()
-private val MUTED_TEXT = 0xFFB5CCE8.toInt()
-
 internal fun Context.roundedSurface(color: Int, radius: Int = 12) = GradientDrawable().apply {
     setColor(color)
     cornerRadius = px(radius).toFloat()
 }
 
 private fun Context.actionBackground(highlight: Boolean = false) = RippleDrawable(
-    ColorStateList.valueOf(if (highlight) 0x220A1020 else 0x3352D9E9),
-    roundedSurface(if (highlight) CANVAS_ACCENT else BUTTON_COLOR),
+    ColorStateList.valueOf(if (highlight) 0x33FFFFFF else 0x33FF3B4E),
+    android.graphics.drawable.StateListDrawable().apply {
+        addState(intArrayOf(-android.R.attr.state_enabled), angularSurface(PANEL_COLOR))
+        addState(intArrayOf(android.R.attr.state_pressed), angularSurface(ACTION_PRESSED, CANVAS_ACCENT))
+        addState(intArrayOf(android.R.attr.state_focused), angularSurface(SELECTED_SURFACE, CANVAS_TEXT))
+        addState(intArrayOf(android.R.attr.state_selected), angularSurface(SELECTED_SURFACE, CANVAS_ACCENT))
+        addState(intArrayOf(), angularSurface(if (highlight) ACTION_FILL else BUTTON_COLOR,
+            if (highlight) CANVAS_ACCENT else CONTROL_OUTLINE))
+    },
     null,
 )
 
@@ -56,10 +59,9 @@ internal fun Context.builderButton(label: String, highlight: Boolean = false, ic
         setPadding(px(10), px(4), px(10), px(4))
         maxLines = 2
         ellipsize = TextUtils.TruncateAt.END
-        val contrast = if (highlight) CANVAS_BACKGROUND else CANVAS_TEXT
         val colors = ColorStateList(
             arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(MUTED_TEXT, contrast),
+            intArrayOf(CONTROL_OUTLINE, CANVAS_TEXT),
         )
         setTextColor(colors)
         background = actionBackground(highlight)
@@ -78,7 +80,7 @@ internal fun Context.iconButton(label: String, icon: Int, click: () -> Unit) = I
     setImageResource(icon)
     imageTintList = ColorStateList(
         arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-        intArrayOf(0xFF7186A2.toInt(), CANVAS_TEXT),
+        intArrayOf(CONTROL_OUTLINE, CANVAS_TEXT),
     )
     background = actionBackground()
     setPadding(px(12), px(12), px(12), px(12))
@@ -116,14 +118,15 @@ internal fun Context.controllerHeader(title: TextView, backLabel: String, onBack
 
 internal fun Context.controlPanel() = LinearLayout(this).apply {
     orientation = LinearLayout.VERTICAL
-    background = roundedSurface(PANEL_COLOR)
+    background = angularSurface(PANEL_COLOR)
     setPadding(px(16), px(12), px(16), px(12))
 }
 
 internal fun Context.heading(label: String) = TextView(this).apply {
     text = label
     textSize = 20f
-    setTypeface(typeface, Typeface.BOLD)
+    typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+    letterSpacing = .02f
     setTextColor(CANVAS_TEXT)
     if (Build.VERSION.SDK_INT >= 28) setAccessibilityHeading(true)
 }
@@ -173,6 +176,7 @@ internal fun Context.choose(title: String, choices: List<String>, onBack: (() ->
 }
 
 internal class ControllerForm(private val context: Context, private val onBack: (() -> Unit)? = null) {
+    private val visibilityRules = mutableListOf<() -> Unit>()
     private val fields = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(context.px(20), context.px(8), context.px(20), context.px(12))
@@ -237,6 +241,7 @@ internal class ControllerForm(private val context: Context, private val onBack: 
         text = label
         isChecked = checked
         minHeight = context.px(48)
+        setOnCheckedChangeListener { _, _ -> refreshFields() }
         fields.addView(this)
     }
 
@@ -248,16 +253,32 @@ internal class ControllerForm(private val context: Context, private val onBack: 
             context.choose(label, options.map(name)) { index ->
                 selected = options[index]
                 button.text = name(selected)
+                refreshFields()
             }
         }
         fields.addView(button)
         return { selected }
     }
 
+    fun <T> whenVisible(visible: () -> Boolean, addFields: () -> T): T {
+        val first = fields.childCount
+        val result = addFields()
+        val children = (first until fields.childCount).map(fields::getChildAt)
+        visibilityRules.add {
+            val visibility = if (visible()) View.VISIBLE else View.GONE
+            children.forEach { it.visibility = visibility }
+        }
+        return result
+    }
+
+    fun note(text: String) { fields.addView(context.hint(text)) }
+
+    private fun refreshFields() = visibilityRules.forEach { it() }
+
     fun color(label: String, value: String): EditText {
         val input = text("$label (#RRGGBB)", value, 7)
-        val presets = listOf("Midnight" to "#1C2C47", "Blue" to "#3157A3", "Cyan" to "#52D9E9", "Mint" to "#51D69A",
-            "Purple" to "#854FCE", "Coral" to "#CC526D", "White" to "#EDF4FF", "Black" to "#0A1020")
+        val presets = listOf("Charcoal" to "#19191D", "Red" to "#FF3B4E", "Dark red" to "#A9162C",
+            "Gray" to "#B5B5BE", "White" to "#F5F5F7", "Black" to "#050506")
         fields.addView(context.builderButton("Choose $label") {
             context.choose(label, presets.map { it.first }) { input.setText(presets[it].second) }
         })
@@ -265,6 +286,7 @@ internal class ControllerForm(private val context: Context, private val onBack: 
     }
 
     fun show(title: String, confirm: String = "Apply", apply: () -> Unit) {
+        refreshFields()
         val scroll = ScrollView(context).apply { addView(fields) }
         val dialog = AlertDialog.Builder(context).setTitle(title).setView(scroll)
             .setOnCancelListener { onBack?.invoke() }
@@ -305,15 +327,30 @@ internal fun Context.configureMotion(previous: MotionSettings, keys: List<String
     val sensitivity = form.number("Sensitivity (0.1–8)", previous.sensitivity)
     val deadZone = form.number("Dead zone (0–0.85)", previous.deadZone)
     val smoothing = form.number("Smoothing (0–500 ms)", previous.smoothingMs)
-    val maximum = form.number("Maximum analog / mouse output (0.1–1)", previous.maximum)
-    val stick = form.choice("Gamepad stick", listOf("LEFT_STICK", "RIGHT_STICK"), previous.stick) { it.replace('_', ' ') }
-    val left = form.choice("Steer left key", keys, previous.leftKey) { it }
-    val right = form.choice("Steer right key", keys, previous.rightKey) { it }
-    val engage = form.number("Steering engage (0.05–1)", previous.engage)
-    val release = form.number("Steering release (0–0.9)", previous.release)
-    val mouse = form.number("Mouse speed at full input (pixels/sec)", previous.mouseScale)
-    val gyro = form.choice("Gyro enable behavior", GyroEnable.entries, previous.gyroEnable) { it.name }
-    val label = form.text("Gyro button label", previous.gyroLabel, 24)
+    val steer = { mapping() == MotionMapping.STEERING }
+    val maximum = form.whenVisible({ !steer() }) { form.number("Maximum output (0.1–1)", previous.maximum) }
+    val stick = form.whenVisible({ mapping() == MotionMapping.STICK }) {
+        form.choice("Gamepad stick", listOf("LEFT_STICK", "RIGHT_STICK"), previous.stick) { it.replace('_', ' ') }
+    }
+    val (left, right) = form.whenVisible(steer) {
+        form.choice("Steer left key", keys, previous.leftKey) { it } to
+            form.choice("Steer right key", keys, previous.rightKey) { it }
+    }
+    val (engage, release) = form.whenVisible(steer) {
+        form.number("Steering engage (0.05–1)", previous.engage) to
+            form.number("Steering release (0–0.9)", previous.release)
+    }
+    val mouse = form.whenVisible({ mapping() == MotionMapping.MOUSE }) {
+        form.number("Mouse speed at full input (pixels/sec)", previous.mouseScale)
+    }
+    val gyro = form.whenVisible({ source() == MotionSource.GYROSCOPE }) {
+        form.note("Hold enables aim during the press. Toggle switches aim on or off. Always enables aim while ready.")
+        form.choice("Gyro enable behavior", GyroEnable.entries, previous.gyroEnable) { it.name.lowercase().replaceFirstChar(Char::titlecase) }
+    }
+    val label = form.whenVisible({ source() == MotionSource.GYROSCOPE && gyro() != GyroEnable.ALWAYS }) {
+        form.text("Gyro button label", previous.gyroLabel, 24)
+    }
+    form.note("Recenter during play to set a comfortable neutral position.")
     val allowedKeys = keys.toSet()
     form.show("Motion settings") {
         val settings = MotionSettings(enabled.isChecked, mapping(), source(), horizontal(), vertical(),
@@ -328,14 +365,13 @@ internal fun Context.configureMotion(previous: MotionSettings, keys: List<String
 
 internal class MotionPanel(context: Context, private val settings: MotionSettings, gyroSettings: MotionSettings?,
     private val usesDedicatedControl: Boolean, recenter: () -> Unit, enable: (Boolean) -> Unit) {
-    private val preview = context.hint("Waiting for motion sensors")
-    private val center = context.builderButton("Recenter", icon = R.drawable.ic_controller_refresh, click = recenter)
+    private val center = context.iconButton("Recenter motion", R.drawable.ic_controller_refresh, recenter)
     private var reportingTouchClick = false
     private val gyro = if (gyroSettings != null && usesDedicatedControl && gyroSettings.gyroEnable != GyroEnable.ALWAYS) {
         context.builderButton(gyroSettings.gyroLabel) {
             if (!reportingTouchClick) {
                 enable(true)
-                if (gyroSettings.gyroEnable == GyroEnable.HOLD) preview.postDelayed({ enable(false) }, 180L)
+                if (gyroSettings.gyroEnable == GyroEnable.HOLD) center.postDelayed({ enable(false) }, 180L)
                 else enable(false)
             }
         }.apply {
@@ -370,13 +406,14 @@ internal class MotionPanel(context: Context, private val settings: MotionSetting
     } else null
     private val gyroLabel = gyroSettings?.gyroLabel
 
-    val view = context.controlPanel().apply {
-        addView(if (gyro == null) context.actionRow(center) else context.actionRow(center, gyro))
-        addView(preview)
+    val view = LinearLayout(context).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        addView(center, LinearLayout.LayoutParams(context.px(48), context.px(48)))
+        gyro?.let { addView(it, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT)) }
     }
 
     fun update(calibrated: Boolean, fresh: Boolean, orientationAvailable: Boolean, gyroAvailable: Boolean, armed: Boolean, output: LayoutPoint, mappings: String) {
-        center.isEnabled = orientationAvailable
+        center.isEnabled = orientationAvailable || settings.source == MotionSource.GYROSCOPE && gyroAvailable
         gyro?.isEnabled = gyroAvailable
         gyro?.let {
             val label = gyroLabel + if (armed) " · On" else " · Off"
@@ -392,6 +429,7 @@ internal class MotionPanel(context: Context, private val settings: MotionSetting
         } + if (!usesDedicatedControl && gyroLabel != null && settings.source != MotionSource.GYROSCOPE)
             if (armed) " · Gyro on" else " · Gyro off" else ""
         val details = listOf(status, mappings).filter { it.isNotBlank() }.joinToString(" · ")
-        if (preview.text != details) preview.text = details
+        center.tooltipText = details
+        if (Build.VERSION.SDK_INT >= 30 && center.stateDescription != status) center.stateDescription = status
     }
 }

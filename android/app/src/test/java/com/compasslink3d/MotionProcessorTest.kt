@@ -18,6 +18,14 @@ class MotionProcessorTest {
     private fun roll(angle: Double) = MotionQuaternion(0.0, sin(angle / 2), 0.0, cos(angle / 2))
     private fun assertNear(expected: Double, observed: Double) = assertEquals(expected, observed, 1e-8)
 
+    @Test fun absoluteHeadingAgreesWithDesktopForMixedPoseAndUndefinedVertical() {
+        assertNear(270.0, yaw(-PI / 2).headingDegrees()!!)
+        assertNear(296.565051177078, MotionQuaternion(.2, .3, .4, .5).headingDegrees()!!)
+        assertNear(296.565051177078, MotionQuaternion(-2.0, -3.0, -4.0, -5.0).headingDegrees()!!)
+        assertNull(pitch(PI / 2).headingDegrees())
+        assertNull(MotionQuaternion(0.0, 0.0, 0.0, 0.0).headingDegrees())
+    }
+
     @Test fun normalizesMultipliesInvertsAndAlignsEquivalentSigns() {
         assertEquals(neutral, MotionQuaternion(0.0, 0.0, 0.0, 2.0).normalized())
         assertNull(MotionQuaternion(0.0, 0.0, 0.0, 0.0).normalized())

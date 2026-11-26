@@ -1,13 +1,13 @@
 :root {
   color-scheme: dark;
-  --bg: #0a1020;
-  --panel: #121c31;
-  --line: #253653;
-  --muted: #8ea2c2;
-  --text: #edf4ff;
-  --cyan: #52d9e9;
-  --green: #51d69a;
-  --red: #ff7988;
+  --bg: #050506;
+  --panel: #101012;
+  --line: #45454c;
+  --muted: #b5b5be;
+  --text: #f5f5f7;
+  --accent: #ff3b4e;
+  --connected: #f5f5f7;
+  --red: #ff8490;
 }
 * {
   box-sizing: border-box;
@@ -15,7 +15,7 @@
 body {
   margin: 0;
   background:
-    radial-gradient(ellipse at 70% 18%, #162542 0, transparent 42%), var(--bg);
+    radial-gradient(ellipse at 70% 18%, #241014 0, transparent 42%), var(--bg);
   color: var(--text);
   font:
     15px/1.5 Inter,
@@ -36,7 +36,7 @@ main {
   margin-bottom: 24px;
 }
 .eyebrow {
-  color: var(--cyan);
+  color: var(--accent);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.16em;
@@ -63,12 +63,12 @@ h1 {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #68758d;
+  background: #797983;
   margin-right: 8px;
 }
 .badge.on .dot {
-  background: var(--green);
-  box-shadow: 0 0 12px #51d69a88;
+  background: var(--connected);
+  box-shadow: 0 0 12px #ff3b4e66;
 }
 .grid {
   display: grid;
@@ -76,9 +76,9 @@ h1 {
   gap: 18px;
 }
 .card {
-  background: linear-gradient(145deg, #142039, #0f182b);
+  background: linear-gradient(145deg, #17171a, #101012);
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 6px;
   overflow: hidden;
   box-shadow: 0 18px 60px #0003;
 }
@@ -104,7 +104,7 @@ canvas {
   touch-action: none;
 }
 canvas:focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--accent);
   outline-offset: -3px;
 }
 .stats {
@@ -115,8 +115,8 @@ canvas:focus-visible {
 }
 .stat {
   border: 1px solid var(--line);
-  background: #0c1527;
-  border-radius: 12px;
+  background: #101012;
+  border-radius: 6px;
   padding: 13px;
 }
 .label {
@@ -154,14 +154,14 @@ canvas:focus-visible {
   color: var(--muted);
 }
 .controller-controls li.held {
-  border-color: var(--cyan);
-  background: #163344;
+  border-color: var(--accent);
+  background: #311318;
   color: var(--text);
 }
 .controller-controls kbd {
   margin-left: 6px;
   font-weight: 700;
-  color: var(--cyan);
+  color: var(--accent);
 }
 .controller-error {
   color: var(--red);
@@ -179,9 +179,9 @@ canvas:focus-visible {
   border-radius: 6px;
 }
 .gamepad-button.held {
-  color: #101a2b;
-  background: var(--cyan);
-  border-color: var(--cyan);
+  color: #050506;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 #gamepad-commanded h3,
 #gamepad-observed h3 {
@@ -202,14 +202,14 @@ canvas:focus-visible {
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 50%;
-  background: #101b30;
+  background: #19191d;
   margin: 4px 0;
 }
 .gamepad-stick span {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--cyan);
+  background: var(--accent);
   transition: transform 60ms linear;
 }
 .gamepad-coordinates {
@@ -242,9 +242,9 @@ canvas:focus-visible {
   display: inline-block;
   margin: 12px 6px 0 0;
   padding: 5px 9px;
-  background: #1b2b46;
+  background: #241014;
   border-radius: 20px;
-  color: #bfd2ef;
+  color: #f5f5f7;
   font-size: 12px;
 }
 @media (max-width: 760px) {
@@ -289,27 +289,27 @@ canvas:focus-visible {
   font: inherit;
   color: var(--muted);
   border: 1px solid var(--line);
-  background: #0c1527;
+  background: #101012;
   border-radius: 10px;
   padding: 10px 16px;
   cursor: pointer;
 }
 .mode-button.selected {
-  color: var(--cyan);
-  border-color: var(--cyan);
-  background: #163344;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: #311318;
 }
 .mode-button:focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--accent);
   outline-offset: 4px;
 }
 pre {
   padding: 12px;
   border: 1px solid var(--line);
-  background: #0c1527;
+  background: #101012;
   border-radius: 10px;
   overflow-x: auto;
-  color: var(--cyan);
+  color: var(--accent);
 }
 .info .connection-note {
   margin-top: 14px;
@@ -326,4 +326,51 @@ pre {
     flex-wrap: wrap;
     gap: 8px;
   }
+}
+
+.capture-card {
+  margin-block: 0 18px;
+  padding: 12px 18px;
+}
+
+.capture-card summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.capture-card form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.capture-card input {
+  width: 12ch;
+  min-height: 44px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--muted);
+  border-radius: 4px;
+  font: inherit;
+  text-transform: uppercase;
+}
+
+#input-capture-target {
+  width: min(100%, 24rem);
+  min-height: 54px;
+  margin-top: 10px;
+}
+
+#input-capture-status:empty {
+  display: none;
+}
+
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }

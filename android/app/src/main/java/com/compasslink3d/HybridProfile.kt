@@ -20,18 +20,20 @@ internal data class HybridSettings(
     val gyroControl: ControlSlot? = null,
     val quickSwitch: Map<String, String> = emptyMap(),
     val secondaryMotion: MotionSettings? = null,
+    val originalAppearance: Boolean = false,
 ) {
     fun encode() = JSONObject().put("hybrid", hybrid).put("orientationPolicy", orientation.name)
         .put("haptics", haptics.name).put("quickSwitch", switchReferences(quickSwitch))
         .apply {
             gyroControl?.let { put("gyroControl", JSONObject().put("control", it.control).put("slot", it.slot.wire)) }
             secondaryMotion?.let { put("secondaryMotion", it.encode()) }
+            if (originalAppearance) put("originalAppearance", true)
         }
 
     companion object {
         fun decode(data: JSONObject, keys: Set<String>): HybridSettings {
             val allowed = setOf(
-                "hybrid", "orientationPolicy", "haptics", "quickSwitch", "gyroControl", "secondaryMotion",
+                "hybrid", "orientationPolicy", "haptics", "quickSwitch", "gyroControl", "secondaryMotion", "originalAppearance",
             )
             require(data.keys().asSequence().all { it in allowed }) { "Unknown hybrid setting" }
             val references = data.getJSONArray("quickSwitch")
@@ -56,6 +58,8 @@ internal data class HybridSettings(
                 OrientationPolicy.valueOf(data.string("orientationPolicy")),
                 TouchHaptics.valueOf(data.string("haptics")), gyro, quickSwitch,
                 if (data.has("secondaryMotion")) MotionSettings.decode(data.getJSONObject("secondaryMotion"), keys) else null,
+                if (data.has("originalAppearance")) data.get("originalAppearance") as? Boolean
+                    ?: throw IllegalArgumentException("Invalid appearance setting") else false,
             )
         }
 

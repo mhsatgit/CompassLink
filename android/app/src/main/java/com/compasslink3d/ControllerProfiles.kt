@@ -13,7 +13,8 @@ internal class ControllerProfiles(
     private val onPlay: (ControllerProfile, ProfileOrientation) -> Unit,
     private val onEdit: (ControllerProfile, Boolean) -> Unit,
     private val onImport: () -> Unit,
-    private val onExport: (ControllerProfile) -> Unit,
+    private val onExport: (ControllerProfile, Boolean) -> Unit,
+    private val onRecovery: () -> Unit,
     initialSelection: String? = null, initialScroll: Int = 0,
 ) {
     var selectedId = initialSelection?.let(store::find)?.id ?: store.active.id
@@ -23,26 +24,32 @@ internal class ControllerProfiles(
     private var playOrientation = selected().orientation
     private val list = context.builderRoot()
     private val preview = LayoutPreview(context)
+    private val drawer = PreviewDrawer(context, preview)
+    private val name = context.heading("")
     private val details = context.hint("")
     private val edit = context.builderButton("Edit", icon = R.drawable.ic_controller_edit) { edit() }
     private val orientationButton = context.builderButton(playOrientation.title, icon = R.drawable.ic_controller_phone) { chooseOrientation() }
 
     val view: View = context.builderRoot().apply {
-        addView(context.heading("Controllers"))
+        addView(context.heading("CompassLink").apply { textSize = 15f; setTextColor(CANVAS_ACCENT) })
+        addView(context.heading("Controllers").apply { textSize = 30f })
         val categories = context.builderRoot().apply {
             addView(context.actionRow(
                 context.builderButton("New profile", icon = R.drawable.ic_controller_add) { create() },
                 context.builderButton("Import JSON", icon = R.drawable.ic_controller_import, click = onImport),
             ))
-            store.loadError?.let { addView(context.hint(it)) }
+            store.loadError?.let {
+                addView(context.builderButton("Recover saved profiles", icon = R.drawable.ic_controller_refresh, click = onRecovery))
+            }
             addView(scroll.apply { addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
         }
         val selection = ScrollView(context).apply {
             isFillViewport = true
             addView(context.controlPanel().apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(preview, LinearLayout.LayoutParams(-1, context.px(76)))
+                addView(name)
                 addView(details)
+                addView(drawer)
                 addView(context.actionRow(
                     orientationButton,
                     context.builderButton("More", icon = R.drawable.ic_controller_more) { more() },
@@ -56,10 +63,14 @@ internal class ControllerProfiles(
             })
         }
         val body = object : LinearLayout(context) {
+            private val categoryStack = LayoutParams(-1, 0, 1f)
+            private val selectionStack = LayoutParams(-1, -2)
+            private val categorySide = LayoutParams(0, -1, 1.15f).apply { marginEnd = context.px(12) }
+            private val selectionSide = LayoutParams(0, -1, 1f)
             init {
                 orientation = VERTICAL
-                addView(categories, LayoutParams(-1, 0, 1f))
-                addView(selection, LayoutParams(-1, 0, 1f))
+                addView(categories, categoryStack)
+                addView(selection, selectionStack)
             }
 
             override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -69,9 +80,12 @@ internal class ControllerProfiles(
                 val direction = if (wide) HORIZONTAL else VERTICAL
                 if (orientation != direction) {
                     orientation = direction
-                    categories.layoutParams = if (wide) LayoutParams(0, -1, 1.15f).apply { marginEnd = context.px(12) }
-                        else LayoutParams(-1, 0, 1f)
-                    selection.layoutParams = if (wide) LayoutParams(0, -1, 1f) else LayoutParams(-1, 0, 1f)
+                    categories.layoutParams = if (wide) categorySide else categoryStack
+                    selection.layoutParams = if (wide) selectionSide else selectionStack
+                }
+                drawer.boundHeight((h * if (wide) .44f else .26f).toInt())
+                if (!wide) {
+                    selectionStack.height = minOf((h * .64f).toInt(), context.px(176) + drawer.contentHeight)
                 }
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec)
             }
@@ -83,14 +97,20 @@ internal class ControllerProfiles(
 
     private fun selected() = store.find(selectedId) ?: DEFAULT_PROFILE
 
+    fun selectImported(id: String) {
+        selectedId = id
+        playOrientation = selected().orientation
+        refresh()
+    }
+
     private fun refresh() {
         list.removeAllViews()
         val chosen = selected()
         for ((builtInGroup, group) in store.profiles.groupBy { it.builtIn }) {
             list.addView(context.hint(if (builtInGroup) "Built-in layouts" else "My layouts"))
             for (profile in group) {
-                val marker = if (profile.id == store.active.id) "  ·  Active" else ""
-                val item = context.builderButton(profile.name + marker, profile.id == chosen.id, R.drawable.ic_controller_gamepad) {
+                val marker = if (profile.id == store.active.id && store.hasPlayed) "  ·  Last played" else ""
+                val item = context.builderButton(profile.name + marker, icon = R.drawable.ic_controller_gamepad) {
                     if (selectedId != profile.id) {
                         selectedId = profile.id
                         playOrientation = profile.orientation
@@ -104,6 +124,7 @@ internal class ControllerProfiles(
             }
         }
         val builtIn = chosen.builtIn
+        name.text = chosen.name
         refreshOrientation()
         edit.text = if (builtIn) "Edit a copy" else "Edit"
         orientationButton.text = playOrientation.title
@@ -127,10 +148,9 @@ internal class ControllerProfiles(
             supported.isEmpty() -> "No output bindings yet"
             else -> supported.joinToString(" / ") { it.title }
         }
-        val count = profile.controls.size
+        val count = profile.controls.count { it.style.visible }
         val countLabel = context.resources.getQuantityString(R.plurals.profile_control_count, count, count)
-        val detailLabel = if (profile.builtIn) R.string.built_in_profile_details else R.string.profile_details
-        details.text = listOf(context.getString(detailLabel, profile.name, countLabel), orientationLabel, outputLabel).joinToString(" · ")
+        details.text = listOf(outputLabel, orientationLabel, countLabel).joinToString(" · ")
     }
 
     private fun chooseOrientation() {
@@ -144,9 +164,10 @@ internal class ControllerProfiles(
         val profile = selected()
         val actions = mutableListOf<Pair<String, () -> Unit>>(
             "Duplicate" to ::duplicate,
-            "Export JSON" to { onExport(profile) },
+            "Export JSON" to { onExport(profile, false) },
         )
         if (!profile.builtIn) {
+            actions.add("Export profile bundle" to { onExport(profile, true) })
             actions.add("Rename" to ::rename)
             actions.add("Delete" to ::delete)
         }

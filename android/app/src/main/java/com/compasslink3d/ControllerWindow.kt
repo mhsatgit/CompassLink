@@ -3,10 +3,15 @@ package com.compasslink3d
 import android.graphics.Rect
 import android.os.Build
 import android.view.View
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.widget.FrameLayout
+import kotlin.math.hypot
 
 @Suppress("DEPRECATION")
 internal class ControllerWindow(private val window: Window) {
@@ -68,5 +73,69 @@ internal class ControllerWindow(private val window: Window) {
             }
             insets
         }
+    }
+}
+
+/** Positions window chrome inside the same safe rectangle used by the controller canvas. */
+internal fun FrameLayout.addMovableAction(action: View, id: String) {
+    val size = context.px(48)
+    addView(action, FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.START))
+    val preferences = context.getSharedPreferences("controller-chrome", android.content.Context.MODE_PRIVATE)
+    val slop = ViewConfiguration.get(context).scaledTouchSlop
+    fun key() = "$id.${if (width > height) "landscape" else "portrait"}"
+    fun travelX() = (width - paddingLeft - paddingRight - size).coerceAtLeast(0)
+    fun travelY() = (height - paddingTop - paddingBottom - size).coerceAtLeast(0)
+    fun originX() = if (layoutDirection == View.LAYOUT_DIRECTION_RTL) travelX() else 0
+    fun place(x: Float, y: Float) {
+        action.translationX = x.coerceIn(0f, travelX().toFloat()) - originX()
+        action.translationY = y.coerceIn(0f, travelY().toFloat())
+    }
+    fun restore() = place(
+        preferences.getFloat("${key()}.x", 1f) * travelX(),
+        preferences.getFloat("${key()}.y", 0f) * travelY(),
+    )
+    addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> restore() }
+    var pointer = MotionEvent.INVALID_POINTER_ID
+    var downX = 0f
+    var downY = 0f
+    var initialX = 0f
+    var initialY = 0f
+    var dragging = false
+    action.setOnTouchListener { button, event ->
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                pointer = event.getPointerId(0)
+                downX = event.rawX
+                downY = event.rawY
+                initialX = action.translationX + originX()
+                initialY = action.translationY
+                dragging = false
+                button.isPressed = true
+            }
+            MotionEvent.ACTION_MOVE -> if (event.getPointerId(0) == pointer) {
+                val dx = event.rawX - downX
+                val dy = event.rawY - downY
+                if (!dragging && hypot(dx, dy) > slop) {
+                    dragging = true
+                    button.isPressed = false
+                }
+                if (dragging) place(initialX + dx, initialY + dy)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> if (event.getPointerId(event.actionIndex) == pointer) {
+                pointer = MotionEvent.INVALID_POINTER_ID
+                button.isPressed = false
+                if (event.isCanceledRelease()) restore()
+                else if (dragging) preferences.edit()
+                    .putFloat("${key()}.x", (action.translationX + originX()) / travelX().coerceAtLeast(1))
+                    .putFloat("${key()}.y", action.translationY / travelY().coerceAtLeast(1)).apply()
+                else button.performClick()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                pointer = MotionEvent.INVALID_POINTER_ID
+                button.isPressed = false
+                restore()
+            }
+        }
+        true
     }
 }

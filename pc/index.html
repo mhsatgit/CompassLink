@@ -49,6 +49,41 @@
           </button>
         </div>
       </section>
+      <section
+        class="card capture-card"
+        aria-label="Capture a controller binding"
+      >
+        <details>
+          <summary>Capture a controller binding</summary>
+          <p class="hint">
+            Open Input bindings in the phone editor and choose Capture keyboard
+            or mouse. Enter the code here, then press a key or click the capture
+            area.
+          </p>
+          <form id="input-capture-form">
+            <label for="input-capture-code">Phone code</label>
+            <input
+              id="input-capture-code"
+              required
+              maxlength="8"
+              minlength="8"
+              pattern="[0-9A-Fa-f]{8}"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="submit" class="mode-button">Start capture</button>
+          </form>
+          <button
+            type="button"
+            id="input-capture-target"
+            class="mode-button"
+            hidden
+          >
+            Press a key or mouse button here
+          </button>
+          <p id="input-capture-status" role="status"></p>
+        </details>
+      </section>
       <section class="grid">
         <article class="card">
           <div class="cardhead">

@@ -3,15 +3,15 @@
     <style name="CompassLinkTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:alertDialogTheme">@style/CompassDialog</item>
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowBackground">#0A1020</item>
-        <item name="android:colorAccent">#52D9E9</item>
+        <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:colorAccent">@color/app_accent</item>
         <item name="android:statusBarColor">#00000000</item>
         <item name="android:navigationBarColor">#00000000</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
     <style name="CompassDialog" parent="android:style/Theme.Material.Dialog.Alert">
-        <item name="android:colorAccent">#52D9E9</item>
+        <item name="android:colorAccent">@color/app_accent</item>
         <item name="android:windowBackground">@drawable/dialog_surface</item>
-        <item name="android:textColorPrimary">#EDF4FF</item>
+        <item name="android:textColorPrimary">@color/app_text</item>
     </style>
 </resources>

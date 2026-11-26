@@ -22,7 +22,10 @@ export function toView(vector) {
   return [vector[0], vector[2], -vector[1]];
 }
 export function orientationAngles(q) {
-  const [x, y, z, w] = q;
+  const size = Math.hypot(...q);
+  if (!Number.isFinite(size) || size === 0)
+    return { heading: 0, pitch: 0, roll: 0, headingDefined: false };
+  const [x, y, z, w] = q.map((component) => component / size);
   const r01 = 2 * (x * y - z * w),
     r11 = 1 - 2 * (x * x + z * z);
   const r20 = 2 * (x * z - y * w),

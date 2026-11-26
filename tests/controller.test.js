@@ -75,23 +75,25 @@ async function setup(t, options = {}) {
       await once(socket, "connect");
       const replies = readline.createInterface({ input: socket });
       const sessionId = randomUUID();
-      async function request(type, sequence, fields) {
+      async function request(type, sequence, fields, fragmentSize) {
         const response = once(replies, "line", {
           signal: AbortSignal.timeout(2000),
         });
-        send(type, sequence, fields);
+        send(type, sequence, fields, fragmentSize);
         return JSON.parse((await response)[0]);
       }
-      function send(type, sequence, fields) {
-        socket.write(
+      function send(type, sequence, fields, fragmentSize) {
+        const frame =
           JSON.stringify({
             version,
             type: `controller.${type}`,
             sessionId,
             sequence,
             ...fields,
-          }) + "\n",
-        );
+          }) + "\n";
+        const size = fragmentSize ?? frame.length;
+        for (let start = 0; start < frame.length; start += size)
+          socket.write(frame.slice(start, start + size));
       }
       return { socket, sessionId, send, request };
     },
@@ -1084,7 +1086,7 @@ test("protocol 5 accepts a large profile and releases input without closing a st
     "controller.ready",
   );
   assert.equal(
-    (await client.request("profile", 1, { profile })).type,
+    (await client.request("profile", 1, { profile }, 521)).type,
     "controller.profile.ready",
   );
   client.send("input", 2, {
@@ -1116,5 +1118,9 @@ test("protocol 5 accepts a large profile and releases input without closing a st
   const updated = await state();
   assert.equal(updated.count, 1);
   assert.equal(updated.controller.held.length, 0);
-  client.socket.end();
+  const closed = once(client.socket, "close");
+  client.send("profile", 7, {
+    profile: { ...profile, padding: "x".repeat(32768) },
+  });
+  await closed;
 });

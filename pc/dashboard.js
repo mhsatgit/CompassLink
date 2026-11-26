@@ -1,4 +1,5 @@
 import { multiply, rotate, toView, orientationAngles } from "./orientation.js";
+import "./binding-ui.js";
 
 const canvas = document.querySelector("#view");
 const context = canvas.getContext("2d");
@@ -34,12 +35,12 @@ const vertices = [
   [-0.43, 0.83, 0.07],
 ];
 const faces = [
-  { indices: [0, 1, 5, 4], color: "#32496d" },
-  { indices: [1, 2, 6, 5], color: "#263b5c" },
-  { indices: [2, 3, 7, 6], color: "#395377" },
-  { indices: [3, 0, 4, 7], color: "#253958" },
-  { indices: [0, 3, 2, 1], color: "#172842" },
-  { indices: [4, 5, 6, 7], color: "#42638c" },
+  { indices: [0, 1, 5, 4], color: "#393239" },
+  { indices: [1, 2, 6, 5], color: "#2b262b" },
+  { indices: [2, 3, 7, 6], color: "#4f3840" },
+  { indices: [3, 0, 4, 7], color: "#3c292f" },
+  { indices: [0, 3, 2, 1], color: "#261a1d" },
+  { indices: [4, 5, 6, 7], color: "#634149" },
 ];
 const normalize = (v) => v.map((n) => n / Math.hypot(...v));
 const dot = (a, b) => a.reduce((sum, n, i) => sum + n * b[i], 0);
@@ -61,7 +62,7 @@ function draw() {
   }
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
-  context.strokeStyle = "#253653";
+  context.strokeStyle = "#34343b";
   for (let i = 0; i < 5; i++) {
     context.beginPath();
     context.ellipse(
@@ -103,7 +104,7 @@ function draw() {
     context.closePath();
     context.fillStyle = color;
     context.fill();
-    context.strokeStyle = "#78a0d2";
+    context.strokeStyle = "#f26778";
     context.lineWidth = 1.3;
     context.stroke();
   }
@@ -132,15 +133,15 @@ function draw() {
       ]
         .map(transform)
         .map(project),
-      "#071323",
+      "#09090a",
     );
     const [x, y] = project(transform([0, 0.56, 0.08]));
-    context.fillStyle = "#52d9e9";
+    context.fillStyle = "#ff3b4e";
     context.beginPath();
     context.arc(x, y, 4, 0, Math.PI * 2);
     context.fill();
   }
-  context.fillStyle = "#8ea2c2";
+  context.fillStyle = "#b5b5be";
   context.font = "12px system-ui";
   context.fillText(
     "World: East / Up / −North · cyan dot marks top",
@@ -559,14 +560,21 @@ function renderMotion(data) {
   const motion = data?.motion;
   document.getElementById("motion-panel").hidden = !motion;
   if (!motion) return;
-  const stale = motion.stale || motion.age > 2;
+  const health = (mapping) => {
+    const gyro = mapping.source === "GYROSCOPE";
+    const sensor = motion.sensors[gyro ? "gyroscope" : motion.orientation];
+    if (!sensor?.available) return "unavailable";
+    if (mapping.stale || motion.age > 2) return "stale";
+    return gyro && !mapping.gyroEnabled ? "off" : "live";
+  };
+  const entries = motion.mappings ?? [motion];
   const calibrated =
     motion.centerAgeMs === null
       ? "Awaiting center"
       : `Centered ${(motion.centerAgeMs / 1000).toFixed(1)} s ago`;
   field(
     "motion-status",
-    `${stale ? "Required sensor stale" : calibrated} · ${motion.invalid} rejected samples`,
+    `${entries.some((mapping) => health(mapping) === "live") ? calibrated : "No live motion mapping"} · ${motion.invalid} rejected samples`,
   );
   field(
     "motion-source",
@@ -583,10 +591,10 @@ function renderMotion(data) {
   };
   field(
     "motion-mapping",
-    (motion.mappings ?? [motion])
+    entries
       .map(
         (m) =>
-          `${m.source === "GYROSCOPE" ? "Gyro" : "Tilt"} → ${mappings[m.mapping]} · ${m.target.replaceAll("_", " ")} · ${m.stale || motion.age > 2 ? "stale" : m.source === "GYROSCOPE" && !m.gyroEnabled ? "off" : "live"} · ${motionValues(m.output, 2)}`,
+          `${m.source === "GYROSCOPE" ? "Gyro" : "Tilt"} → ${mappings[m.mapping]} · ${m.target.replaceAll("_", " ")} · ${health(m)} · ${motionValues(m.output, 2)}`,
       )
       .join(" / "),
   );

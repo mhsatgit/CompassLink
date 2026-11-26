@@ -25,6 +25,9 @@ test("Android north/east/west headings and ENU conversion", async () => {
   near(top[1], 0);
   near(top[2], -1);
   assert.equal(orientationAngles([s, 0, 0, s]).headingDefined, false);
+  near(orientationAngles([0.2, 0.3, 0.4, 0.5]).heading, 296.565051177078);
+  near(orientationAngles([-2, -3, -4, -5]).heading, 296.565051177078);
+  assert.equal(orientationAngles([0, 0, 0, 0]).headingDefined, false);
 });
 
 test("quaternion sign changes preserve pose and full rotations preserve vectors", async () => {

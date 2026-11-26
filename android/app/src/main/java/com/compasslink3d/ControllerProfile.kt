@@ -98,10 +98,10 @@ internal data class ControlGeometry(
 )
 
 internal data class ControlStyle(
-    val background: String = "#1C2C47",
-    val border: String = "#476487",
-    val text: String = "#EDF4FF",
-    val pressed: String = "#167B8D",
+    val background: String = "#19191D",
+    val border: String = "#FF3B4E",
+    val text: String = "#F5F5F7",
+    val pressed: String = "#A9162C",
     val opacity: Double = 1.0,
     val shape: ControlShape = ControlShape.ROUNDED_RECTANGLE,
     val cornerRadius: Double = .18,

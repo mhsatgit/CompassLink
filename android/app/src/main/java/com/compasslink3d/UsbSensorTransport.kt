@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
 internal class UsbSensorTransport(
     private val controllerToken: String?,
     descriptor: JSONObject?,
-    private val onSensorStatus: (String) -> Unit,
+    private val onSensorStatus: (Boolean) -> Unit,
     private val onControllerStatus: (Boolean, String) -> Unit,
     private val onAuthorized: () -> Unit,
     private val onAuthorizationRejected: () -> Unit,
@@ -68,7 +68,7 @@ internal class UsbSensorTransport(
                         if (!running) return@thread
                         socket.connect(InetSocketAddress("127.0.0.1", 8765), 1500)
                         socket.tcpNoDelay = true
-                        onSensorStatus("Connected through ADB tunnel (USB / wireless)")
+                        onSensorStatus(true)
                         val link = controllerToken?.let {
                             ControllerLink(socket, ControllerProtocol(it, OutputMode.HYBRID))
                         }
@@ -76,13 +76,14 @@ internal class UsbSensorTransport(
                         if (link != null) replies = readReplies(link)
                         writePackets(socket.getOutputStream().bufferedWriter(Charsets.UTF_8), link)
                     } catch (_: IOException) {
-                        if (running) onSensorStatus("Waiting for PC server and ADB tunnel (USB / wireless).")
+                        // Close and retry the transport below.
                     } finally {
                         val wasReady = readyLink.getAndSet(null) != null
                         controllerLink.set(null)
                         connection.compareAndSet(socket, null)
                         closeSocket(socket)
                         replies?.join()
+                        if (running) onSensorStatus(false)
                         if (running && requested.get() != null && (wasReady || replies == null)) {
                             onControllerStatus(false, "Waiting for PC server and ADB tunnel.")
                         }

@@ -25,9 +25,17 @@ import org.json.JSONArray
 import java.util.Locale
 
 class MainActivity : Activity() {
+    private enum class Workspace { BROWSE, EDIT, PAUSED, PLAY }
     private lateinit var sensors: MotionSensors
     private val motionHandler = Handler(Looper.getMainLooper())
     private val motionTick = Runnable { tickMotion() }
+    private val sensorUiTick = object : Runnable {
+        override fun run() {
+            if (!foreground) return
+            if (streaming && sensorGauge.isAttachedToWindow) updateSensorHealth(SystemClock.elapsedRealtimeNanos())
+            motionHandler.postDelayed(this, 250L)
+        }
+    }
     private lateinit var status: TextView
     private lateinit var values: TextView
     private lateinit var toggle: Button
@@ -41,7 +49,8 @@ class MainActivity : Activity() {
     private var playSurface: View? = null
     private var playProfile: ControllerProfile? = null
     private var playOrientation = ProfileOrientation.LANDSCAPE
-    private var playing = false
+    private var workspace = Workspace.BROWSE
+    private val playing get() = workspace == Workspace.PLAY
     private var destination = Destination.CONNECT
     private var editorOrigin: String? = null
     private var editorSessionProfile: ControllerProfile? = null
@@ -50,6 +59,10 @@ class MainActivity : Activity() {
     private var libraryScroll = 0
     private var connectMode: TextView? = null
     private var connectionLabel: TextView? = null
+    private var receiverGeneration = 0
+    private var recheckReceiver: (() -> Unit)? = null
+    private var sensorLinkReady = false
+    private var lastSensorPose: MotionQuaternion? = null
     private lateinit var sensorGauge: OrientationGauge
     private lateinit var sensorSummary: TextView
     private var outputMode = OutputMode.KEYBOARD
@@ -78,13 +91,13 @@ class MainActivity : Activity() {
     private var telemeteredAt = 0L
     private var controllerReady = false
     private var selectOnAcknowledgement = false
+    private var announceSwitch = false
     private var transport: UsbSensorTransport? = null
     private var transportGrant: ControllerGrant? = null
     private var streaming = false
     private var foreground = false
     private var focused = false
     private var samples = 0L
-    private var lastUiTimestamp = 0L
     private var lastPanelTimestamp = 0L
     private var connectionMode = "unknown"
 
@@ -94,9 +107,11 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val grant = launchGrant(intent) ?: return
+        setIntent(intent)
         controllerGrant = grant
         connectionMode = grant.mode
         connectMode?.text = if (connectionMode == "usb") "USB debugging" else "Wireless debugging"
+        recheckReceiver?.invoke()
         syncTransport()
     }
 
@@ -153,8 +168,8 @@ class MainActivity : Activity() {
         editorOrigin = savedInstanceState?.getString("editorOrigin")
         playOrientation = ProfileOrientation.entries.firstOrNull { it.name == savedInstanceState?.getString("playOrientation") }
             ?: ProfileOrientation.LANDSCAPE
-        streaming = savedInstanceState?.getBoolean("streaming") == true && available != null
-        if (streaming) toggle.setText(R.string.stop_streaming)
+        if (savedInstanceState?.getBoolean("streaming") == true)
+            status.setText(R.string.stream_interrupted)
         val draft = savedInstanceState?.getString("draft")?.let {
             runCatching { profileCodec.decode(org.json.JSONObject(it)) }.getOrNull()
         }
@@ -211,10 +226,10 @@ class MainActivity : Activity() {
 
     private fun showControllerScreen(profile: ControllerProfile, orientation: ProfileOrientation, startPlaying: Boolean = true,
         switching: Boolean = false) {
-        if (!switching && !reportErrors { profiles.select(profile.id) }) return
         clearControllerScreen()
         playProfile = profile
-        selectOnAcknowledgement = switching
+        selectOnAcknowledgement = true
+        announceSwitch = switching
         playOrientation = orientation
         legacyTilt = profile.controls.any { control ->
             control.type == ControlType.TILT && control.style.visible && control.bindings.values.any { it.supports(outputMode) }
@@ -235,7 +250,10 @@ class MainActivity : Activity() {
             if (event == ControllerInput.Neutral) stopMotion()
             transport?.sendInput(event)
             if (event == ControllerInput.Neutral) syncSensorListener()
-        }.apply { onPointerReleased = { id -> transport?.discardPointer(id) } }
+        }.apply {
+            originalAppearance = !profile.builtIn && profile.hybrid?.originalAppearance == true
+            onPointerReleased = { id -> transport?.discardPointer(id) }
+        }
         controllerPad = pad
         val connectionStatus = hint("").apply {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
@@ -282,7 +300,6 @@ class MainActivity : Activity() {
                             stopMotion()
                             sessionProfileChanged()
                             pad.render((playProfile ?: profile).layoutFor(chosen).controls)
-                            orientController(chosen)
                         }
                     }
                 }
@@ -318,15 +335,9 @@ class MainActivity : Activity() {
         controllerOptions = options
         val view = FrameLayout(this).apply {
             setBackgroundColor(CANVAS_BACKGROUND)
-            addView(LinearLayout(context).apply {
-                this.orientation = LinearLayout.VERTICAL
-                // Only the controls need clearance from the camera cutout.
+            addView(FrameLayout(context).apply {
                 controllerWindow.insetContent(this, 0, protectSystemBars = false)
-                addView(FrameLayout(context).apply {
-                    controllerWindow.insetContent(this, 0, protectBottom = false)
-                    addView(builderButton("Pause", icon = R.drawable.ic_controller_settings) { setPlaying(false) },
-                        FrameLayout.LayoutParams(-2, -2, Gravity.END))
-                }, LinearLayout.LayoutParams(-1, -2))
+                addView(pad, FrameLayout.LayoutParams(-1, -1))
                 motion?.let { processor ->
                     val feedback = profile.hybrid?.haptics ?: TouchHaptics.OFF
                     val panel = MotionPanel(context, processor.settings, gyro?.settings, profile.hybrid?.gyroControl == null, {
@@ -343,22 +354,21 @@ class MainActivity : Activity() {
                         }
                     })
                     motionPanel = panel
-                    addView(panel.view)
+                    addView(panel.view, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL))
                 }
-                playStatus = hint("").apply {
+                playStatus = builderButton("", icon = R.drawable.ic_controller_refresh) { replaceTransport() }.apply {
                     gravity = Gravity.CENTER
                     accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-                    setPadding(px(10), px(8), px(10), px(8))
-                    addView(this)
+                    addView(this, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
                 }
-                addView(pad, LinearLayout.LayoutParams(-1, 0, 1f))
+                addMovableAction(iconButton("Pause", R.drawable.ic_controller_pause) { setPlaying(false) }, "play-pause")
                 playSurface = this
             }, FrameLayout.LayoutParams(-1, -1))
             addView(options, FrameLayout.LayoutParams(-1, -1))
         }
         pad.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateInputReadiness() }
         setPlaying(startPlaying)
-        mountController(view, lock)
+        mountController(view, if (startPlaying) lock else null)
         syncTransport()
     }
 
@@ -410,13 +420,24 @@ class MainActivity : Activity() {
     }
 
     private fun setPlaying(value: Boolean) {
-        playing = value
+        workspace = when {
+            value -> Workspace.PLAY
+            playProfile != null -> Workspace.PAUSED
+            else -> Workspace.BROWSE
+        }
         controllerPad?.releaseAll()
         playSurface?.visibility = if (playing) View.VISIBLE else View.GONE
         controllerOptions?.visibility = if (playing) View.GONE else View.VISIBLE
         controllerWindow.immersive(playing)
+        val profile = playProfile
+        if (profile != null) {
+            val lock = playLock(profile)
+            orientController(if (playing) lock else null)
+            if (playing) controllerPad?.render(profile.layoutFor(lock ?: resources.configuration.layoutOrientation).controls)
+        }
         if (playing) playSurface?.requestApplyInsets() else controllerOptions?.requestApplyInsets()
         updateInputReadiness()
+        if (playing && controllerReady) acknowledgeProfile()
     }
 
     private fun editFromPlay(profile: ControllerProfile) {
@@ -433,6 +454,8 @@ class MainActivity : Activity() {
         library?.let { librarySelection = playProfile?.id ?: it.selectedId; libraryScroll = it.scrollY }
         library = null
         connectionLabel = null
+        receiverGeneration++
+        recheckReceiver = null
         connectMode = null
         clearControllerScreen()
         if (!keepPausedSession) {
@@ -477,10 +500,11 @@ class MainActivity : Activity() {
                 addView(heading(linkName).also { connectMode = it })
                 addView(label)
                 lateinit var check: Button
-                check = builderButton("Check link", true, R.drawable.ic_controller_signal) {
+                fun refreshLink() {
+                    val generation = ++receiverGeneration
+                    diagram.state = ReceiverState.CHECKING
+                    label.setText(R.string.checking_receiver)
                     check.isEnabled = false
-                    diagram.verified = false
-                    label.text = "Checking the PC receiver…"
                     kotlin.concurrent.thread(isDaemon = true) {
                         val connected = runCatching {
                             java.net.Socket().use { socket ->
@@ -496,13 +520,21 @@ class MainActivity : Activity() {
                             }
                         }.getOrDefault(false)
                         runOnUiThread {
-                            if (connectionLabel === label) {
+                            if (this@MainActivity.foreground && connectionLabel === label && generation == receiverGeneration) {
                                 check.isEnabled = true
-                                diagram.verified = connected
+                                diagram.state = if (connected) ReceiverState.REACHABLE else ReceiverState.UNREACHABLE
                                 label.text = if (connected) "PC receiver reachable" else "Waiting for PC · Check setup"
+                                motionHandler.postDelayed({
+                                    if (this@MainActivity.foreground && connectionLabel === label && generation == receiverGeneration)
+                                        refreshLink()
+                                }, 5000L)
                             }
                         }
                     }
+                }
+                check = builderButton("Check link", true, R.drawable.ic_controller_signal) {
+                    recheckReceiver = ::refreshLink
+                    refreshLink()
                 }
                 addView(actionRow(check, builderButton("Setup", icon = R.drawable.ic_controller_settings) {
                     choose("Connection setup", listOf("USB debugging", "Wireless debugging")) { index ->
@@ -512,7 +544,8 @@ class MainActivity : Activity() {
                     }
                 }))
             })
-            addView(heading("Last controller").apply { setPadding(0, px(18), 0, px(6)) })
+            addView(heading(if (profiles.hasPlayed) "Last played" else "Start with a controller")
+                .apply { setPadding(0, px(18), 0, px(6)) })
             val recent = profiles.active
             addView(controlPanel().apply {
                 addView(LayoutPreview(this@MainActivity).apply { profile = recent },
@@ -528,7 +561,7 @@ class MainActivity : Activity() {
         browse()
         editorOrigin = null
         val screen = ControllerProfiles(this, profiles, ::playController,
-            ::showEditor, ::importProfile, ::exportProfile, librarySelection, libraryScroll)
+            ::showEditor, ::importProfile, ::exportProfile, ::recoverProfiles, librarySelection, libraryScroll)
         library = screen
         mountDestination(Destination.CONTROLLERS, screen.view)
     }
@@ -554,8 +587,9 @@ class MainActivity : Activity() {
                     showControllerScreen(origin, playOrientation, false)
                 }
             }, ::orientController, controllerWindow, unsaved,
-            { profiles.profiles }, profiles.find(profile.id))
+            { profiles.profiles }, profiles.find(profile.id), { controllerGrant })
         editor = screen
+        workspace = Workspace.EDIT
         mountController(screen.view, profile.lockedOrientation)
         syncTransport()
     }
@@ -563,7 +597,7 @@ class MainActivity : Activity() {
     private fun mountController(view: View, orientation: ProfileOrientation? = null) {
         setContentView(view)
         view.requestApplyInsets()
-        controllerWindow.immersive(playing || editor?.canvasOnly == true)
+        controllerWindow.immersive(playing || editor != null)
         orientController(orientation)
     }
 
@@ -608,13 +642,29 @@ class MainActivity : Activity() {
         })
     }
 
-    private fun exportProfile(profile: ControllerProfile) {
+    private fun exportProfile(profile: ControllerProfile, bundle: Boolean) {
         pendingExport = profile.id
-        openDocument(EXPORT_PROFILE, Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+        val title = profile.name.replace(Regex("[^a-zA-Z0-9 _.-]"), "_")
+        exportDocument(if (bundle) EXPORT_BUNDLE else EXPORT_PROFILE, title + if (bundle) ".bundle.json" else ".json")
+    }
+
+    private fun exportDocument(request: Int, title: String) {
+        openDocument(request, Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "application/json"
-            putExtra(Intent.EXTRA_TITLE, profile.name.replace(Regex("[^a-zA-Z0-9 _.-]"), "_") + ".json")
+            putExtra(Intent.EXTRA_TITLE, title)
         })
+    }
+
+    private fun recoverProfiles() {
+        val error = profiles.loadError ?: return
+        android.app.AlertDialog.Builder(this).setTitle("Saved profiles could not be loaded")
+            .setMessage("$error\n\nYou can export the original data or start a new library. Starting a new library keeps a backup on this phone.")
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Export backup") { _, _ -> exportDocument(EXPORT_RECOVERY, "compasslink-damaged-profiles.json") }
+            .setPositiveButton("Reset library") { _, _ ->
+                if (reportErrors { profiles.resetDamaged() }) showProfiles()
+            }.show()
     }
 
     @Suppress("DEPRECATION")
@@ -631,23 +681,29 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         val export = pendingExport
-        if (requestCode == EXPORT_PROFILE) pendingExport = null
+        if (requestCode == EXPORT_PROFILE || requestCode == EXPORT_BUNDLE) pendingExport = null
         val uri = data?.data ?: return
         if (resultCode != RESULT_OK) return
         reportErrors {
             when (requestCode) {
                 IMPORT_PROFILE -> {
-                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBounded(MAX_PROFILE_BYTES) }
+                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBounded(MAX_PROFILE_BUNDLE_BYTES) }
                         ?: throw java.io.IOException("Could not open the selected profile")
-                    val imported = profileCodec.decode(bytes)
-                    profiles.importProfile(imported)
+                    val importedId = profiles.importDocument(bytes)
                     showProfiles()
+                    library?.selectImported(importedId)
                 }
-                EXPORT_PROFILE -> {
+                EXPORT_PROFILE, EXPORT_BUNDLE -> {
                     val profile = export?.let(profiles::find) ?: throw IllegalStateException("The saved profile could not be found")
+                    val document = if (requestCode == EXPORT_BUNDLE) ProfileBundle.export(profile, profiles.profiles).encode(profileCodec)
+                        else profileCodec.encode(profile)
                     val target = contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("The file could not be opened")
-                    target.use { it.write(profileCodec.encode(profile).toString(2).toByteArray(Charsets.UTF_8)) }
+                    target.use { it.write(document.toString().toByteArray(Charsets.UTF_8)) }
                     android.widget.Toast.makeText(this, "Controller profile exported", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                EXPORT_RECOVERY -> {
+                    val target = contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("The file could not be opened")
+                    target.use(profiles::exportDamaged)
                 }
             }
         }
@@ -685,21 +741,23 @@ class MainActivity : Activity() {
             return
         }
         samples = 0
-        lastUiTimestamp = 0
+        lastSensorPose = null
+        sensorGauge.pose(null)
         streamedAt = 0
         toggle.setText(R.string.stop_streaming)
         syncTransport()
     }
 
-    private fun stopStream() {
+    private fun stopStream(keepController: Boolean = true) {
         streaming = false
+        lastSensorPose = null
         transport?.clearSamples()
         status.setText(R.string.streaming_stopped)
         sensorSummary.setText(R.string.sensor_ready)
         sensorGauge.pose(null)
         values.text = status.text
         toggle.setText(R.string.start_streaming)
-        syncTransport()
+        if (keepController) syncTransport()
     }
 
     private fun replaceTransport() = syncTransport(force = true)
@@ -729,29 +787,32 @@ class MainActivity : Activity() {
                 displayConnectionStatus(controllerReady, message)
             }
             updateInputReadiness()
+            if (controllerReady) acknowledgeProfile()
             updateKeepAwake()
             return
         }
         if (descriptor != null) displayConnectionStatus(false, "Connecting to the PC through ADB…")
         // Ignore callbacks from sessions that were closed or superseded.
         lateinit var session: UsbSensorTransport
-        session = UsbSensorTransport(grant?.token, descriptor, { message ->
-            runOnUiThread { if (transport === session && streaming) status.text = message }
+        session = UsbSensorTransport(grant?.token, descriptor, { connected ->
+            runOnUiThread {
+                if (transport === session) {
+                    sensorLinkReady = connected
+                    if (streaming) status.text = if (connected) "PC receiver connected" else "PC receiver disconnected"
+                }
+            }
         }, { ready, message ->
             runOnUiThread {
                 if (transport === session && ready == session.profileReady) {
                     val wasReady = controllerReady
                     controllerReady = ready
-                    if (wasReady && !ready) stopMotion()
+                    if (wasReady && !ready) {
+                        stopMotion()
+                        if (playing) setPlaying(false)
+                    }
                     updateInputReadiness()
                     displayConnectionStatus(ready, message)
-                    if (ready && selectOnAcknowledgement) {
-                        selectOnAcknowledgement = false
-                        playProfile?.let {
-                            reportErrors { profiles.select(it.id) }
-                            Toast.makeText(this, it.name, Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                    if (ready) acknowledgeProfile()
                     updateKeepAwake()
                 }
             }
@@ -763,6 +824,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (transport === session && grant != null) {
                     grantStore.forget(grant)
+                    if (launchGrant(intent) == grant) intent.removeExtra("controller_token")
                     controllerGrant = grantStore.saved
                     connectionMode = controllerGrant?.mode ?: "unknown"
                     syncTransport()
@@ -777,6 +839,14 @@ class MainActivity : Activity() {
         updateKeepAwake()
     }
 
+    private fun acknowledgeProfile() {
+        val profile = playProfile ?: return
+        if (!selectOnAcknowledgement || !playing) return
+        selectOnAcknowledgement = false
+        reportErrors { profiles.select(profile.id) }
+        if (announceSwitch) Toast.makeText(this, profile.name, Toast.LENGTH_SHORT).show()
+    }
+
     private fun displayConnectionStatus(ready: Boolean, message: String) {
         controllerMessage = message
         val link = when (connectionMode) {
@@ -787,11 +857,12 @@ class MainActivity : Activity() {
         controllerStatus?.text = if (link == null) message else getString(R.string.controller_link_status, link, message)
         playStatus?.apply {
             text = message
+            contentDescription = if (ready) null else "$message Tap to retry."
             visibility = if (ready) View.GONE else View.VISIBLE
         }
         controllerRetry?.apply {
             text = if (ready) "Reconnect" else "Retry"
-            visibility = if (message.startsWith("Synchronizing")) View.GONE else View.VISIBLE
+            visibility = View.VISIBLE
         }
     }
 
@@ -807,6 +878,7 @@ class MainActivity : Activity() {
         val session = transport
         stopMotion()
         controllerReady = false
+        sensorLinkReady = false
         transport = null
         transportGrant = null
         controllerPad?.setReady(false)
@@ -853,6 +925,32 @@ class MainActivity : Activity() {
         motionRotation = null
     }
 
+    private fun updateSensorHealth(now: Long) {
+        val source = sensors.absolute
+        val at = sensors.timestamp(source)
+        val fresh = freshMotion(at, now)
+        if (at > 0) lastSensorPose = source?.let(sensors::pose)
+        sensorGauge.pose(lastSensorPose, lastKnown = !fresh)
+        val ageMs = (now - at).coerceAtLeast(0) / 1_000_000
+        val health = when {
+            source == null -> "Orientation sensor unavailable"
+            at <= 0 -> "Waiting for first orientation sample"
+            !fresh -> "Stale · Last known orientation ($ageMs ms old)"
+            else -> if (sensorLinkReady) "Live · $ageMs ms old" else "Phone sensor live · PC disconnected"
+        }
+        val rate = sensors.rate(source, now)?.let { "%.0f Hz".format(it) }
+        sensorSummary.text = listOfNotNull(sensors.label(source), rate,
+            when (source) {
+                MotionSensor.GAME -> "Relative heading"
+                MotionSensor.ROTATION -> "Magnetic heading"
+                else -> null
+            }, health).joinToString(" · ")
+        values.text = lastSensorPose?.let {
+            String.format(Locale.US, "%s\nSamples sent: %d\nQuaternion x y z w\n%.3f  %.3f  %.3f  %.3f",
+                health, samples, it.x, it.y, it.z, it.w)
+        } ?: health
+    }
+
     @Suppress("DEPRECATION")
     private fun tickMotion() {
         if (!foreground) return
@@ -897,19 +995,6 @@ class MainActivity : Activity() {
                 samples++
             }
         }
-        if (streaming && now - lastUiTimestamp >= 250_000_000L) {
-            val source = sensors.absolute
-            val fresh = freshMotion(absoluteAt, now)
-            val q = source?.takeIf { fresh }?.let(sensors::pose)
-            sensorGauge.pose(q)
-            val rate = sensors.rate(source, now)?.let { "%.0f Hz".format(it) } ?: "Measuring rate"
-            sensorSummary.text = listOfNotNull(sensors.label(source), rate,
-                if (source == MotionSensor.GAME) "Relative heading" else if (source != null) "Magnetic heading" else null,
-                if (fresh) "${(now - absoluteAt) / 1_000_000} ms old" else "Waiting for fresh orientation").joinToString(" · ")
-            values.text = if (q == null) "Waiting for fresh orientation"
-                else String.format(Locale.US, "Samples: %d\nQuaternion x y z w:\n%.3f  %.3f  %.3f  %.3f", samples, q.x, q.y, q.z, q.w)
-            lastUiTimestamp = now
-        }
         if (motionPanel != null && playing && now - lastPanelTimestamp >= 200_000_000L) {
             motionPanel?.update(processor?.relative != null, processor?.fresh(now) == true,
                 selected != null || sensors.available(MotionSensor.GAME) || sensors.available(MotionSensor.ROTATION),
@@ -923,6 +1008,8 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         foreground = true
+        motionHandler.post(sensorUiTick)
+        recheckReceiver?.invoke()
         syncTransport()
         updateInputReadiness()
     }
@@ -932,7 +1019,9 @@ class MainActivity : Activity() {
         focused = hasFocus
         if (!hasFocus) {
             controllerPad?.releaseAll()
-        } else controllerWindow.immersive(playing || editor?.canvasOnly == true)
+            if (playing && controllerReady) setPlaying(false)
+            editor?.cancelDrag()
+        } else controllerWindow.immersive(playing || editor != null)
         if (::sensors.isInitialized) updateInputReadiness()
     }
 
@@ -957,12 +1046,11 @@ class MainActivity : Activity() {
     }
 
     private fun navigateBack(): Boolean {
-        when {
-            editor != null -> editor?.requestBack()
-            playing -> setPlaying(false)
-            controllerPad != null -> showProfiles()
-            destination != Destination.CONNECT -> showConnect()
-            else -> return false
+        when (workspace) {
+            Workspace.EDIT -> editor?.requestBack()
+            Workspace.PLAY -> setPlaying(false)
+            Workspace.PAUSED -> showProfiles()
+            Workspace.BROWSE -> if (destination != Destination.CONNECT) showConnect() else return false
         }
         return true
     }
@@ -974,7 +1062,13 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         foreground = false
+        receiverGeneration++
+        motionHandler.removeCallbacks(sensorUiTick)
         if (playing) setPlaying(false)
+        if (streaming) {
+            stopStream(keepController = false)
+            status.setText(R.string.stream_interrupted)
+        }
         closeTransport()
         syncSensorListener()
         updateKeepAwake()
@@ -990,6 +1084,8 @@ class MainActivity : Activity() {
     private companion object {
         const val IMPORT_PROFILE = 21
         const val EXPORT_PROFILE = 22
+        const val EXPORT_BUNDLE = 23
+        const val EXPORT_RECOVERY = 24
         val exclusiveModes = listOf(OutputMode.KEYBOARD, OutputMode.GAMEPAD)
     }
 }

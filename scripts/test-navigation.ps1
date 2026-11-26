@@ -48,7 +48,7 @@ Tap 'Resume Play'
 Tap 'End session'
 Tap 'New profile'
 Tap 'Create'
-Tap 'Add'
+Tap 'Add control'
 Tap 'Button'
 Tap 'Open editor tools'
 Tap 'Control properties'
@@ -57,7 +57,6 @@ Back
 [void](Find-Action 'Input bindings')
 Back
 Tap 'Resume editing'
-Back
 Back
 Tap 'Keep editing'
 Back

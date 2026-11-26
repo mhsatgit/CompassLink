@@ -12,6 +12,69 @@ import java.io.IOException
 import java.io.StringReader
 
 class ControllerProfileTest {
+    private fun switchProfile(id: String, target: String): ControllerProfile {
+        val control = newControl(ControlType.PROFILE_SWITCH)
+        return ControllerProfile(id, id, 10, 20, controls = listOf(control),
+            hybrid = HybridSettings(hybrid = false, quickSwitch = mapOf(control.id to target)))
+    }
+
+    @Test fun dependencyBundleRestoresCyclesAndRemapsCollisionsBeforeWriting() {
+        val first = switchProfile("custom-a", "custom-b")
+        val second = switchProfile("custom-b", "custom-a")
+        val builtIns = BUILT_IN_PROFILES
+        val bundle = ProfileBundle.export(first, builtIns + first + second)
+        assertEquals(listOf(first, second), bundle.members)
+        val exported = bundle.encode(codec)
+        val decoded = ProfileBundle.decode(exported, codec)
+        assertEquals(exported.toString(), decoded.encode(codec).toString())
+        val unrelated = first.copy(controls = emptyList(), hybrid = null)
+        val imported = decoded.remap(builtIns + unrelated)
+        assertNotEquals(first.id, imported.selected)
+        val replaced = imported.members.first()
+        assertEquals(first.createdAt, replaced.createdAt)
+        assertEquals(first.modifiedAt, replaced.modifiedAt)
+        assertEquals(second.id, replaced.hybrid!!.quickSwitch.values.single())
+        assertEquals(replaced.id, imported.members.last().hybrid!!.quickSwitch.values.single())
+    }
+
+    @Test fun bundleRejectsMissingReferencesAndDuplicatesAndRespectsStoreCapacity() {
+        val missing = switchProfile("custom-missing", "custom-target")
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileBundle(missing.id, listOf(missing)).remap(BUILT_IN_PROFILES)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileBundle(missing.id, listOf(missing, missing)).remap(BUILT_IN_PROFILES)
+        }
+        val target = ControllerProfile("custom-target", "Target", 1, 1)
+        val recovered = ProfileBundle(missing.id, listOf(missing)).remap(BUILT_IN_PROFILES + target)
+        assertEquals(missing, recovered.members.single())
+        val installed = List(MAX_CUSTOM_PROFILES) { target.copy(id = "installed-$it") }
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileBundle(target.id, listOf(target)).remap(BUILT_IN_PROFILES + installed)
+        }
+    }
+
+    @Test fun exportWalksLongChainsAndStopsAtBuiltInsAndRejectsMalformedBundle() {
+        val end = switchProfile("end", DEFAULT_PROFILE_ID)
+        val middle = switchProfile("middle", end.id)
+        val start = switchProfile("start", middle.id)
+        val bundle = ProfileBundle.export(start, BUILT_IN_PROFILES + listOf(start, middle, end))
+        assertEquals(listOf("start", "middle", "end"), bundle.members.map { it.id })
+        val json = bundle.encode(codec)
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileBundle.decode(json.put("bundleVersion", 2), codec)
+        }
+        val invalid = switchProfile("self", "self")
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileBundle(invalid.id, listOf(invalid)).remap(BUILT_IN_PROFILES)
+        }
+        val full = List(MAX_CUSTOM_PROFILES) { start.copy(id = "custom-$it", hybrid = null, controls = emptyList()) }
+        val maximum = ProfileBundle(full.first().id, full)
+        assertEquals(full, ProfileBundle.decode(maximum.encode(codec), codec).remap(BUILT_IN_PROFILES).members)
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileBundle.decode(maximum.copy(members = full + end).encode(codec), codec)
+        }
+    }
     @Test fun portraitPresetsKeepBindingsAndFitDifferentDisplays() {
         for (preset in BUILT_IN_PROFILES) {
             val portrait = preset.layoutFor(ProfileOrientation.PORTRAIT)

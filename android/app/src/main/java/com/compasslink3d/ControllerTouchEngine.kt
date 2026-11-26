@@ -139,6 +139,41 @@ internal class ControllerTouchEngine(
         onPress()
     }
 
+    fun accessiblePress(target: PhysicalControl, direction: Slot?, progress: Double?, time: Long): Boolean {
+        val model = target.model
+        if (model.type in listOf(ControlType.TOUCHPAD, ControlType.TILT, ControlType.PROFILE_SWITCH)) {
+            click(model)
+            return true
+        }
+        if (model.type.capturesDrag && touched(model.id)) return false
+        val box = target.box
+        val level = progress?.coerceIn(0.0, 1.0) ?: 1.0
+        val local = when (direction) {
+            Slot.UP -> LayoutPoint(0.0, -box.height / 2)
+            Slot.DOWN -> LayoutPoint(0.0, box.height / 2)
+            Slot.LEFT -> LayoutPoint(-box.width / 2, 0.0)
+            Slot.RIGHT -> LayoutPoint(box.width / 2, 0.0)
+            else -> when {
+                model.type == ControlType.TRIGGER -> LayoutPoint(0.0, (level - .5) * box.height)
+                model.type == ControlType.SLIDER && model.settings.vertical -> LayoutPoint(0.0, (.5 - level) * box.height)
+                model.type == ControlType.SLIDER -> LayoutPoint((level - .5) * box.width, 0.0)
+                else -> LayoutPoint(0.0, 0.0)
+            }
+        }
+        val point = box.world(local)
+        val contact = Contact(target, box.center, time, false, true, null)
+        contacts[ACCESSIBILITY_POINTER] = contact
+        if (model.type == ControlType.SLIDER && model.bindings[Slot.WHEEL]?.supports(mode) == true)
+            contact.value = value(model.id).x
+        update(contact, point, time)
+        return true
+    }
+
+    fun accessibleRelease(time: Long) {
+        val contact = contacts[ACCESSIBILITY_POINTER] ?: return
+        up(ACCESSIBILITY_POINTER, contact.previous, time, canceled = true)
+    }
+
     fun updateTilt(angle: Double, time: Long): Boolean {
         val control = tiltControl ?: return false
         if (!angle.isFinite()) return false
@@ -287,6 +322,8 @@ internal class ControllerTouchEngine(
 
     private val ControlType.capturesDrag get() = this != ControlType.BUTTON && this != ControlType.DPAD
 }
+
+private const val ACCESSIBILITY_POINTER = -2
 
 internal fun dpadSlots(x: Double, y: Double): Set<Slot> = buildSet {
     if (maxOf(abs(x), abs(y)) < .27) return@buildSet

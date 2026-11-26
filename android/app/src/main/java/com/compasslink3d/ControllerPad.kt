@@ -17,15 +17,13 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeProvider
 import kotlin.math.roundToInt
 
-internal const val CANVAS_BACKGROUND = 0xFF0A1020.toInt()
-internal const val CANVAS_ACCENT = 0xFF52D9E9.toInt()
-internal const val CANVAS_TEXT = 0xFFEDF4FF.toInt()
-
 internal fun MotionEvent.isCanceledRelease() = Build.VERSION.SDK_INT >= 33 && (flags and MotionEvent.FLAG_CANCELED) != 0
 
-internal open class ControllerCanvas(context: Context, private val editing: Boolean) : View(context) {
+internal open class ControllerCanvas(context: Context, private val editing: Boolean, private val miniature: Boolean = false) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    private val controlRect = RectF()
+    var originalAppearance = false
     protected val density: Double get() = resources.displayMetrics.density.toDouble()
     protected var physical = emptyList<PhysicalControl>()
         private set
@@ -61,13 +59,14 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(CANVAS_BACKGROUND)
-        if (editing) {
-            paint.color = 0xFF263653.toInt()
+        if (editing || miniature) {
+            paint.color = QUIET_OUTLINE
             val spacing = dp(20).toInt().coerceAtLeast(1)
             for (x in spacing until width step spacing) {
                 for (y in spacing until height step spacing) canvas.drawCircle(x.toFloat(), y.toFloat(), dp(1).toFloat(), paint)
             }
-            models.firstOrNull { it.type == ControlType.TOUCH_LOOK && it.id == selectedId }?.let { layer ->
+            models.firstOrNull { it.type == ControlType.TOUCH_LOOK &&
+                (it.id == selectedId || miniature && it.style.visible) }?.let { layer ->
                 paint.color = CANVAS_ACCENT
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = dp(2).toFloat()
@@ -86,7 +85,7 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
         val (control, box) = item
         val halfW = (box.width / 2).toFloat()
         val halfH = (box.height / 2).toFloat()
-        val rect = RectF(-halfW, -halfH, halfW, halfH)
+        val rect = controlRect.apply { set(-halfW, -halfH, halfW, halfH) }
         val style = control.style
         val active = pressed(control.id)
         val alpha = (255 * style.opacity * if (control.style.visible) 1.0 else .33).roundToInt()
@@ -94,16 +93,18 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
         canvas.save()
         canvas.translate(box.center.x.toFloat(), box.center.y.toFloat())
         canvas.rotate(box.rotation.toFloat())
-        paint.color = Color.parseColor(if (active) style.pressed else style.background)
+        paint.color = if (originalAppearance) Color.parseColor(if (active) style.pressed else style.background)
+            else if (active) ACTION_PRESSED else if (control.type == ControlType.TOUCHPAD) PANEL_COLOR else BUTTON_COLOR
         paint.alpha = alpha
         canvas.drawRoundRect(rect, radius, radius, paint)
-        paint.color = Color.parseColor(style.border)
+        val border = if (originalAppearance) Color.parseColor(style.border) else CANVAS_ACCENT
+        paint.color = border
         paint.alpha = alpha
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = dp(1.5).toFloat()
         canvas.drawRoundRect(rect, radius, radius, paint)
         paint.style = Paint.Style.FILL
-        val labelColor = Color.parseColor(style.text)
+        val labelColor = if (originalAppearance) Color.parseColor(style.text) else CANVAS_TEXT
         val unit = minOf(halfW, halfH)
         val labelSize = minOf(dp(18).toFloat(), unit * .52f)
         when (control.type) {
@@ -117,12 +118,12 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
             ControlType.JOYSTICK -> {
                 val value = axes(control.id)
                 val base = (halfW * control.settings.radius * .74).toFloat()
-                paint.color = Color.parseColor(style.border)
+                paint.color = border
                 paint.alpha = alpha
                 paint.style = Paint.Style.STROKE
                 canvas.drawCircle(0f, 0f, base, paint)
                 paint.style = Paint.Style.FILL
-                paint.color = if (active) CANVAS_ACCENT else labelColor
+                paint.color = if (active) CANVAS_ACCENT else if (originalAppearance) labelColor else ACTION_FILL
                 paint.alpha = (alpha * .78).roundToInt()
                 canvas.drawCircle((value.x * base).toFloat(), (value.y * base).toFloat(), unit * .24f, paint)
                 text(canvas, control.label, 0f, halfH * .71f, labelSize * .85f, labelColor, alpha, halfW * 1.4f)
@@ -131,7 +132,7 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
                 val fraction = axes(control.id).x.toFloat()
                 val vertical = control.type == ControlType.TRIGGER || control.settings.vertical
                 val travel = (if (vertical) halfH else halfW) * .7f
-                paint.color = Color.parseColor(style.border)
+                paint.color = border
                 paint.alpha = alpha
                 paint.strokeWidth = dp(3).toFloat()
                 val origin = if (vertical) halfW * .62f else halfH * .48f
@@ -152,7 +153,7 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
                     labelSize, labelColor, alpha, if (vertical) halfW * 1.35f else halfW * 1.75f)
             }
             ControlType.TOUCHPAD -> {
-                paint.color = Color.parseColor(style.border)
+                paint.color = border
                 paint.alpha = alpha / 2
                 for (row in -1..1) for (column in -2..2) {
                     canvas.drawCircle(column * halfW * .31f, row * halfH * .53f, dp(2).toFloat(), paint)
@@ -198,7 +199,14 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
 
     protected fun resizeHandle(box: ControlBox) = box.world(LayoutPoint(box.width / 2 - dp(10), box.height / 2 - dp(10)))
     protected fun rotateHandle(box: ControlBox) = box.world(LayoutPoint(0.0, -box.height / 2 + dp(10)))
-    protected fun dp(amount: Number) = amount.toDouble() * density
+    protected fun dp(amount: Number): Double {
+        val display = resources.displayMetrics
+        val scale = if (miniature) {
+            val shortest = minOf(display.widthPixels, display.heightPixels).coerceAtLeast(1)
+            (minOf(width, height).toDouble() / shortest).coerceIn(.18, 1.0)
+        } else 1.0
+        return amount.toDouble() * density * scale
+    }
 
     private data class Arrow(val slot: Slot, val glyph: String, val x: Float, val y: Float)
     private companion object {
@@ -218,6 +226,14 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, priva
     private val hasMouseLook = profile.controls.any { it.style.visible && it.bindings[Slot.POINTER]?.supports(mode) == true }
     private var ready = false
     private var accessibleFocus = View.NO_ID
+    private var accessibleHover = View.NO_ID
+    private val controlAccessibilityIds = mutableMapOf<String, Int>()
+    private var accessibleActuation = View.NO_ID
+    private val releaseAccessibility = Runnable {
+        touch.accessibleRelease(SystemClock.uptimeMillis())
+        accessibleActuation = View.NO_ID
+        invalidate()
+    }
     private var scheduledExpiry: Long? = null
     private val expireMotion = Runnable {
         scheduledExpiry = null
@@ -239,6 +255,8 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, priva
     }
 
     fun releaseAll(notify: Boolean = true) {
+        removeCallbacks(releaseAccessibility)
+        accessibleActuation = View.NO_ID
         touch.clear(notify && ready)
         scheduleMotionExpiry()
         invalidate()
@@ -261,6 +279,8 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, priva
     override fun onPhysicalLayout() {
         releaseAll()
         touch.controls = physical
+        physical.forEach { accessibilityId(it.model) }
+        if (accessibilityControl(accessibleFocus) == null) accessibleFocus = View.NO_ID
         touch.backgroundLook = models.firstOrNull { it.type == ControlType.TOUCH_LOOK && it.style.visible &&
             it.bindings[Slot.POINTER]?.supports(mode) == true }?.let { layer ->
             viewport?.let { area -> PhysicalControl(layer, area.box(layer)) }
@@ -311,16 +331,76 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, priva
         return true
     }
 
+    override fun performClick() = super.performClick()
+
     override fun getAccessibilityNodeProvider() = accessibility
+
+    private fun accessibilityId(control: LayoutControl) =
+        controlAccessibilityIds.getOrPut(control.id) { controlAccessibilityIds.size + 1 }
+
+    private fun accessibilityControl(id: Int) = physical.firstOrNull { accessibilityId(it.model) == id }
+
+    private fun announceNode(id: Int, type: Int) {
+        val item = accessibilityControl(id) ?: return
+        val event = if (Build.VERSION.SDK_INT >= 30) AccessibilityEvent(type)
+            else @Suppress("DEPRECATION") AccessibilityEvent.obtain(type)
+        event.setSource(this, id)
+        event.packageName = context.packageName
+        event.contentDescription = item.model.displayName
+        parent?.requestSendAccessibilityEvent(this, event)
+    }
+
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        val manager = context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+        if (manager?.isTouchExplorationEnabled != true) return super.onHoverEvent(event)
+        val hovered = if (event.actionMasked == MotionEvent.ACTION_HOVER_EXIT) View.NO_ID
+            else physical.lastOrNull { it.contains(LayoutPoint(event.x.toDouble(), event.y.toDouble())) }
+                ?.let { accessibilityId(it.model) } ?: View.NO_ID
+        if (hovered != accessibleHover) {
+            announceNode(accessibleHover, AccessibilityEvent.TYPE_VIEW_HOVER_EXIT)
+            accessibleHover = hovered
+            announceNode(hovered, AccessibilityEvent.TYPE_VIEW_HOVER_ENTER)
+        }
+        return true
+    }
+
+    private fun runAccessibleAction(item: PhysicalControl, action: Int, arguments: Bundle?): Boolean {
+        if (!acceptsInput) return false
+        val id = accessibilityId(item.model)
+        if (action == R.id.action_release_control) {
+            if (accessibleActuation != id) return false
+            removeCallbacks(releaseAccessibility)
+            releaseAccessibility.run()
+            return true
+        }
+        val direction = accessibilityDirections.firstOrNull { it.first == action }?.second
+        val type = item.model.type
+        val range = type == ControlType.TRIGGER || type == ControlType.SLIDER
+        val level = if (action == android.R.id.accessibilityActionSetProgress && range) {
+            arguments?.getFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, Float.NaN)
+                ?.takeIf { it.isFinite() && it in 0f..1f }?.toDouble() ?: return false
+        } else null
+        if (direction != null && type != ControlType.JOYSTICK && type != ControlType.DPAD) return false
+        if (direction == null && level == null &&
+            (action != AccessibilityNodeInfo.ACTION_CLICK || !hasClickBinding(item.model))) return false
+        removeCallbacks(releaseAccessibility)
+        releaseAccessibility.run()
+        if (!touch.accessiblePress(item, direction, level, SystemClock.uptimeMillis())) return false
+        accessibleActuation = id
+        postDelayed(releaseAccessibility, 180L)
+        scheduleMotionExpiry()
+        invalidate()
+        return true
+    }
 
     @Suppress("DEPRECATION")
     private val accessibility = object : AccessibilityNodeProvider() {
         override fun createAccessibilityNodeInfo(id: Int): AccessibilityNodeInfo? {
             if (id == HOST_VIEW_ID) return AccessibilityNodeInfo.obtain(this@ControllerPad).also { host ->
                 onInitializeAccessibilityNodeInfo(host)
-                for (index in physical.indices) host.addChild(this@ControllerPad, index)
+                for (item in physical) host.addChild(this@ControllerPad, accessibilityId(item.model))
             }
-            val item = physical.getOrNull(id) ?: return null
+            val item = accessibilityControl(id) ?: return null
             val (control, box) = item
             val local = Rect((box.center.x - box.halfX).toInt(), (box.center.y - box.halfY).toInt(),
                 (box.center.x + box.halfX).toInt(), (box.center.y + box.halfY).toInt())
@@ -329,7 +409,9 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, priva
                 setSource(this@ControllerPad, id)
                 setParent(this@ControllerPad)
                 packageName = context.packageName
-                className = "android.widget.Button"
+                val range = control.type == ControlType.TRIGGER || control.type == ControlType.SLIDER
+                val directional = control.type == ControlType.JOYSTICK || control.type == ControlType.DPAD
+                className = if (range) "android.widget.SeekBar" else if (directional) "android.view.View" else "android.widget.Button"
                 contentDescription = control.displayName
                 isVisibleToUser = isShown
                 isEnabled = acceptsInput
@@ -345,21 +427,31 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, priva
                 addAction(if (isAccessibilityFocused) AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_ACCESSIBILITY_FOCUS
                     else AccessibilityNodeInfo.AccessibilityAction.ACTION_ACCESSIBILITY_FOCUS)
                 if (isClickable) addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK)
+                if (isEnabled && directional) for ((action, direction) in accessibilityDirections) {
+                    addAction(AccessibilityNodeInfo.AccessibilityAction(action, direction.wire.replaceFirstChar(Char::uppercase)))
+                }
+                if (range) {
+                    rangeInfo = AccessibilityNodeInfo.RangeInfo.obtain(AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT,
+                        0f, 1f, touch.value(control.id).x.toFloat())
+                    if (isEnabled) addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS)
+                }
+                if (isEnabled && accessibleActuation == id)
+                    addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_release_control, "Release control"))
             }
+        }
+
+        override fun findFocus(focus: Int): AccessibilityNodeInfo? {
+            if (focus != AccessibilityNodeInfo.FOCUS_ACCESSIBILITY || accessibleFocus == View.NO_ID) return null
+            return createAccessibilityNodeInfo(accessibleFocus)
         }
 
         override fun performAction(id: Int, action: Int, arguments: Bundle?): Boolean {
             if (id == HOST_VIEW_ID) return performAccessibilityAction(action, arguments)
-            val item = physical.getOrNull(id) ?: return false
+            val item = accessibilityControl(id) ?: return false
             val eventType = when (action) {
-                AccessibilityNodeInfo.ACTION_CLICK -> {
-                    if (!acceptsInput || !hasClickBinding(item.model)) return false
-                    touch.click(item.model)
-                    scheduleMotionExpiry()
-                    invalidate()
-                    AccessibilityEvent.TYPE_VIEW_CLICKED
-                }
                 AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> {
+                    if (accessibleFocus != id)
+                        announceNode(accessibleFocus, AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED)
                     accessibleFocus = id
                     AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
                 }
@@ -367,7 +459,10 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, priva
                     accessibleFocus = View.NO_ID
                     AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED
                 }
-                else -> return false
+                else -> {
+                    if (!runAccessibleAction(item, action, arguments)) return false
+                    AccessibilityEvent.TYPE_VIEW_CLICKED
+                }
             }
             val event = AccessibilityEvent.obtain(eventType)
             event.setSource(this@ControllerPad, id)
@@ -378,6 +473,9 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, priva
             return true
         }
     }
+
+    private val accessibilityDirections = listOf(R.id.action_control_up to Slot.UP, R.id.action_control_down to Slot.DOWN,
+        R.id.action_control_left to Slot.LEFT, R.id.action_control_right to Slot.RIGHT)
 }
 
 internal fun View.feedback(level: TouchHaptics) {
