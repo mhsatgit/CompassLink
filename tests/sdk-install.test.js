@@ -7,7 +7,10 @@ function powershell(code) {
   const result = spawnSync(
     "powershell.exe",
     [
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
       `$ErrorActionPreference = 'Stop'
        . ./scripts/toolchain.ps1
        . ./scripts/install-sdk.ps1
@@ -20,10 +23,13 @@ function powershell(code) {
   return JSON.parse(result.stdout);
 }
 
-test("SDK installer keeps package identifiers intact and skips completed packages", {
-  skip: process.platform !== "win32",
-}, () => {
-  const result = powershell(`
+test(
+  "SDK installer keeps package identifiers intact and skips completed packages",
+  {
+    skip: process.platform !== "win32",
+  },
+  () => {
+    const result = powershell(`
     # Use an isolated fixture SDK and a fake CLI; never download during this test.
     $compassToolsRoot = Join-Path ([IO.Path]::GetTempPath()) ('compasslink-sdk-test-' + [guid]::NewGuid().ToString('N'))
     $env:ANDROID_HOME = Resolve-AndroidSdk
@@ -57,16 +63,22 @@ test("SDK installer keeps package identifiers intact and skips completed package
       Remove-Item -LiteralPath $target -Recurse -Force
     }
   `);
-  assert.deepEqual(result.Calls, [
-    "platforms/android-37.0", "build-tools/37.0.0", "build-tools/37.0.0",
-  ]);
-  assert.equal(result.BeforeRepair, 2);
-});
+    assert.deepEqual(result.Calls, [
+      "platforms/android-37.0",
+      "build-tools/37.0.0",
+      "build-tools/37.0.0",
+    ]);
+    assert.equal(result.BeforeRepair, 2);
+  },
+);
 
-test("SDK installer rejects a zero exit result when packages are still missing", {
-  skip: process.platform !== "win32",
-}, () => {
-  const result = powershell(`
+test(
+  "SDK installer rejects a zero exit result when packages are still missing",
+  {
+    skip: process.platform !== "win32",
+  },
+  () => {
+    const result = powershell(`
     $compassToolsRoot = Join-Path ([IO.Path]::GetTempPath()) ('compasslink-sdk-absent-' + [guid]::NewGuid().ToString('N'))
     $env:ANDROID_HOME = Resolve-AndroidSdk
     function Invoke-AndroidCli([string[]]$Arguments) { $global:LASTEXITCODE = 0 }
@@ -75,13 +87,20 @@ test("SDK installer rejects a zero exit result when packages are still missing",
     catch { $failure = $_.Exception.Message }
     @{ Failure = $failure } | ConvertTo-Json -Compress
   `);
-  assert.match(result.Failure, /did not install all files for platforms\/android-37\.0/);
-});
+    assert.match(
+      result.Failure,
+      /did not install all files for platforms\/android-37\.0/,
+    );
+  },
+);
 
-test("Android CLI invocation quotes an SDK path with spaces and propagates failure", {
-  skip: process.platform !== "win32",
-}, () => {
-  const result = powershell(`
+test(
+  "Android CLI invocation quotes an SDK path with spaces and propagates failure",
+  {
+    skip: process.platform !== "win32",
+  },
+  () => {
+    const result = powershell(`
     Initialize-AndroidEnvironment
     $env:ANDROID_HOME = 'C:\\fixture sdk with spaces'
     $script:received = $null
@@ -95,8 +114,13 @@ test("Android CLI invocation quotes an SDK path with spaces and propagates failu
     catch { $failure = $_.Exception.Message }
     @{ Arguments = $script:received; Failure = $failure } | ConvertTo-Json -Compress
   `);
-  assert.deepEqual(result.Arguments, [
-    "--no-metrics", "--sdk=C:\\fixture sdk with spaces", "sdk", "install", "platforms/android-37.0",
-  ]);
-  assert.match(result.Failure, /exit 27/);
-});
+    assert.deepEqual(result.Arguments, [
+      "--no-metrics",
+      "--sdk=C:\\fixture sdk with spaces",
+      "sdk",
+      "install",
+      "platforms/android-37.0",
+    ]);
+    assert.match(result.Failure, /exit 27/);
+  },
+);

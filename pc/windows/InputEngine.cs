@@ -2,7 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Threading;
 
 namespace CompassLink
@@ -12,7 +15,10 @@ namespace CompassLink
         private const uint Keyboard = 1;
         private const uint KeyUp = 2;
         private const uint ExtendedKey = 1;
+        private const uint ScanCodeKey = 8;
+        private const uint VirtualKeyToExtendedScanCode = 4;
         private const uint Move = 0x0001;
+        private const uint MoveNoCoalesce = 0x2000;
         private const uint Wheel = 0x0800;
         private const int LeaseMs = 3000;
         private static readonly UIntPtr EventTag = new UIntPtr(0x434C4E4B);
@@ -35,9 +41,11 @@ namespace CompassLink
         };
 
         private readonly object gate = new object();
-        private readonly HashSet<ushort> held = new HashSet<ushort>();
+        private readonly Dictionary<ushort, KeyboardInput> held = new Dictionary<ushort, KeyboardInput>();
         private readonly HashSet<uint> heldMouse = new HashSet<uint>();
         private readonly Stopwatch clock = Stopwatch.StartNew();
+        private NamedPipeClientStream keyboard;
+        private StreamReader keyboardReplies;
         private long deadline;
         private bool faulted;
 
@@ -84,6 +92,7 @@ namespace CompassLink
                 lock (gate)
                 {
                     if (AnyHeld) Fault("Windows rejected input release");
+                    CloseKeyboard();
                 }
             }
             return faulted ? 1 : 0;
@@ -98,14 +107,17 @@ namespace CompassLink
                     Fault("Keyboard input lease expired");
                     return;
                 }
+                if (deadline == 0 && keyboard == null) OpenKeyboard();
+                if (keyboard != null) keyboard.WriteByte(3);
                 deadline = clock.ElapsedMilliseconds + LeaseMs;
                 return;
             }
-            if (line == "reset")
+            if (line == "reset" || line == "reset-for-switch")
             {
                 deadline = 0;
                 ReleaseAll();
                 if (AnyHeld) Fault("Windows rejected input release");
+                else if (!faulted && line == "reset-for-switch") Console.WriteLine("switch-reset");
                 return;
             }
 
@@ -132,7 +144,7 @@ namespace CompassLink
             else if (parts.Length == 3 && parts[0] == "move" &&
                 TryDelta(parts[1], 512, out x) && TryDelta(parts[2], 512, out y))
             {
-                if (!SendMouse(Move, x, y, 0)) SendFailure();
+                if (!SendMouse(Move | MoveNoCoalesce, x, y, 0)) SendFailure();
             }
             else if (parts.Length == 2 && parts[0] == "wheel" && TryDelta(parts[1], 8, out y))
             {
@@ -171,13 +183,21 @@ namespace CompassLink
 
         private void SetKey(ushort key, bool down)
         {
-            if (held.Contains(key) == down) return;
-            if (!SendKey(key, down))
+            if (keyboard != null)
+            {
+                var command = new[] { (byte)(down ? 1 : 2), (byte)key };
+                keyboard.Write(command, 0, command.Length);
+                return;
+            }
+            KeyboardInput stroke;
+            if (held.TryGetValue(key, out stroke) == down) return;
+            if (down) stroke = ResolveKey(key);
+            if (!SendKey(stroke, down))
             {
                 SendFailure();
                 return;
             }
-            if (down) held.Add(key);
+            if (down) held.Add(key, stroke);
             else held.Remove(key);
         }
 
@@ -195,32 +215,120 @@ namespace CompassLink
 
         private void SendFailure()
         {
-            Fault("Windows SendInput failed (error " + Marshal.GetLastWin32Error() + ")");
+            int error = Marshal.GetLastWin32Error();
+            Fault("Windows could not send input to the foreground app (SendInput error " + error +
+                "). If the game runs as administrator, close it and launch it normally.");
         }
 
         private void CheckLease(object unused)
         {
             lock (gate)
             {
-                if (faulted)
+                try
                 {
-                    ReleaseAll();
-                    return;
+                    if (faulted)
+                    {
+                        ReleaseAll();
+                        return;
+                    }
+                    if (deadline == 0 && keyboard != null)
+                    {
+                        // Preserve the neutral device across profile and focus changes.
+                        keyboard.WriteByte(3);
+                    }
+                    if (deadline != 0 && clock.ElapsedMilliseconds >= deadline)
+                    {
+                        ReleaseAll();
+                        Fault("Keyboard input lease expired");
+                    }
                 }
-                if (deadline != 0 && clock.ElapsedMilliseconds >= deadline)
+                catch (Exception error)
                 {
-                    ReleaseAll();
-                    Fault("Keyboard input lease expired");
+                    CloseKeyboard();
+                    Fault("Virtual keyboard helper disconnected: " + error.GetBaseException().Message);
                 }
             }
         }
 
         private void ReleaseAll()
         {
+            if (keyboard != null)
+            {
+                try
+                {
+                    keyboard.WriteByte(4);
+                    ExpectKeyboardReply("reset", 3000);
+                }
+                catch (Exception error)
+                {
+                    CloseKeyboard();
+                    Fault("Virtual keyboard release could not be confirmed: " + error.GetBaseException().Message);
+                }
+            }
             heldMouse.RemoveWhere(button => SendMouse(button << 1, 0, 0, 0));
             // Release ordinary keys before modifiers so cleanup keeps chord ordering.
-            held.RemoveWhere(key => (key < 0x10 || key > 0x12) && SendKey(key, false));
-            held.RemoveWhere(key => key >= 0x10 && key <= 0x12 && SendKey(key, false));
+            var keys = new List<ushort>(held.Keys);
+            ReleaseKeys(keys, false);
+            ReleaseKeys(keys, true);
+        }
+
+        private void OpenKeyboard()
+        {
+            using (var identity = WindowsIdentity.GetCurrent())
+            {
+                var pipe = new NamedPipeClientStream(".", "CompassLink.Keyboard." + identity.User.Value,
+                    PipeDirection.InOut, PipeOptions.Asynchronous);
+                try { pipe.Connect(250); }
+                catch (TimeoutException)
+                {
+                    pipe.Dispose();
+                    Console.WriteLine("keyboard-sendinput");
+                    return;
+                }
+                catch
+                {
+                    pipe.Dispose();
+                    throw;
+                }
+                keyboard = pipe;
+            }
+            try
+            {
+                keyboardReplies = new StreamReader(keyboard);
+                keyboard.WriteByte(0);
+                ExpectKeyboardReply("ready", 8000);
+                Console.WriteLine("keyboard-hid");
+            }
+            catch
+            {
+                CloseKeyboard();
+                throw;
+            }
+        }
+
+        private void ExpectKeyboardReply(string expected, int timeoutMs)
+        {
+            var response = keyboardReplies.ReadLineAsync();
+            if (!response.Wait(timeoutMs)) throw new TimeoutException("The virtual keyboard helper did not respond.");
+            string line = response.Result;
+            if (line != expected) throw new IOException(line ?? "The virtual keyboard helper disconnected.");
+        }
+
+        private void CloseKeyboard()
+        {
+            if (keyboardReplies != null) keyboardReplies.Dispose();
+            if (keyboard != null) keyboard.Dispose();
+            keyboardReplies = null;
+            keyboard = null;
+        }
+
+        private void ReleaseKeys(List<ushort> keys, bool modifiers)
+        {
+            foreach (ushort key in keys)
+            {
+                if ((key >= 0x10 && key <= 0x12) == modifiers && SendKey(held[key], false))
+                    held.Remove(key);
+            }
         }
 
         private void Fault(string reason)
@@ -235,14 +343,38 @@ namespace CompassLink
             Console.WriteLine("error " + reason);
         }
 
-        private static bool SendKey(ushort key, bool down)
+        private static KeyboardInput ResolveKey(ushort key)
+        {
+            IntPtr foreground = GetForegroundWindow();
+            uint processId;
+            uint thread = foreground == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foreground, out processId);
+            uint scan = MapVirtualKeyEx(key, VirtualKeyToExtendedScanCode, GetKeyboardLayout(thread));
+            uint prefix = scan >> 8;
+            // Navigation keys can share their scan code with the numeric keypad.
+            bool extended = prefix == 0xE0 || (key >= 0x21 && key <= 0x28) || key == 0x2D || key == 0x2E;
+            uint flags = extended ? ExtendedKey : 0;
+            if (scan != 0 && (prefix == 0 || prefix == 0xE0))
+            {
+                return new KeyboardInput
+                {
+                    ScanCode = (ushort)(scan & 0xFF),
+                    Flags = ScanCodeKey | flags,
+                    ExtraInfo = EventTag
+                };
+            }
+            return new KeyboardInput
+            {
+                VirtualKey = key,
+                Flags = flags,
+                ExtraInfo = EventTag
+            };
+        }
+
+        private static bool SendKey(KeyboardInput stroke, bool down)
         {
             var input = new Input { Type = Keyboard };
-            input.Data.Keyboard.VirtualKey = key;
-            input.Data.Keyboard.Flags = down ? 0 : KeyUp;
-            if ((key >= 0x21 && key <= 0x28) || key == 0x2D || key == 0x2E)
-                input.Data.Keyboard.Flags |= ExtendedKey;
-            input.Data.Keyboard.ExtraInfo = EventTag;
+            if (!down) stroke.Flags |= KeyUp;
+            input.Data.Keyboard = stroke;
             return SendInput(1, ref input, InputSize) == 1;
         }
 
@@ -259,6 +391,18 @@ namespace CompassLink
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint count, ref Input input, int size);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint MapVirtualKeyEx(uint code, uint mapType, IntPtr keyboardLayout);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetKeyboardLayout(uint threadId);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct Input

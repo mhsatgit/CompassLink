@@ -15,7 +15,7 @@ $projectRoot = Split-Path $PSScriptRoot -Parent
 $adb = Resolve-Adb
 
 function Assert-Endpoint([string]$Endpoint) {
-    if ($Endpoint -notmatch '^[a-zA-Z0-9.-]+:\d{1,5}$') {
+    if ($Endpoint.Length -gt 259 -or $Endpoint -notmatch '^[a-zA-Z0-9][a-zA-Z0-9.-]*:[0-9]{1,5}$') {
         throw 'Enter the phone IP address and port, for example 192.168.1.20:37123.'
     }
     $port = [int]($Endpoint.Split(':')[-1])
@@ -65,7 +65,7 @@ if ($SkipInstall) {
     if ($Reinstall -or !($installed -match '^package:com\.compasslink3d\s*$')) {
         $apk = "$projectRoot/android/app/build/outputs/apk/debug/app-debug.apk"
         if (!(Test-Path $apk)) { throw 'Run npm run build:android first' }
-        & $adb -s $serial install -r $apk
+        & $adb -s $serial install --no-streaming -r $apk
         if ($LASTEXITCODE -ne 0) { throw 'APK installation failed' }
     } else {
         Write-Host 'Companion already installed; skipping installation. Use -Reinstall after rebuilding the app.'
@@ -103,7 +103,6 @@ if ($LASTEXITCODE -eq 0 -and ($launchOutput -match 'its current task has been br
     $launchOutput = & $adb @launchArgs
 }
 if ($LASTEXITCODE -ne 0 -or ($launchOutput -match 'Error:|Error type|Exception')) {
-    throw 'Unable to open companion app. If using -SkipInstall, install the prebuilt CompassLink APK on the phone first. See README Method 1.'
+    throw 'Unable to open companion app. If using -SkipInstall, install the prebuilt CompassLink APK on the phone first. See the README quick start.'
 }
-$launchOutput | Write-Host
-Write-Host "$Mode tunnel ready. Run npm start, open http://127.0.0.1:8000, and tap Start streaming or Controller Mode on your phone."
+Write-Host "$Mode tunnel ready. Run npm start, open http://127.0.0.1:8000, and open Sensors or Controllers on your phone."

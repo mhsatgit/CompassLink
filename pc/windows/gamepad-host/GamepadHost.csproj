@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyName>CompassLink.GamepadHost</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseAppHost>false</UseAppHost>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="HIDMaestro.Core">
+      <HintPath>../../../.tools/gamepad/HIDMaestro.Core.dll</HintPath>
+    </Reference>
+    <Compile Include="../gamepad-probe/XInput.cs" Link="XInput.cs" />
+  </ItemGroup>
+</Project>

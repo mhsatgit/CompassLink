@@ -1,0 +1,36 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run format:check
+  android:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build and check a clean source export
+        shell: pwsh
+        run: |
+          npm run export:source
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Path dist/source-check | Out-Null
+          tar -xf "dist/CompassLink3D-v$version-source.zip" -C dist/source-check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Set-Location dist/source-check
+          npm run setup:android
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run test:android

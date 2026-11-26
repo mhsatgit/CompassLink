@@ -2,13 +2,27 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
-const vm = require("node:vm");
+const os = require("node:os");
 const path = require("node:path");
+const vm = require("node:vm");
 
-// Exercise the downloader with simulated HTTP responses, without network access.
-function fixture({ rejectHead = false, ignoreRanges = false, size = 19 } = {}) {
+const url = "https://example.test/archive.zip";
+
+async function fixture(
+  t,
+  { rejectHead = false, ignoreRanges = false, fail = false, size = 19 } = {},
+) {
+  const root = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), "compasslink-download-test-"),
+  );
+  const target = path.join(root, "archive.partial");
+  t.after(async () => {
+    await fs.promises.unlink(target).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+    await fs.promises.rmdir(root);
+  });
   const payload = Buffer.from(Array.from({ length: size }, (_, i) => i));
-  const files = new Map();
   const requests = [];
   const childProcess = {
     execFileSync() {
@@ -19,79 +33,78 @@ function fixture({ rejectHead = false, ignoreRanges = false, size = 19 } = {}) {
       assert.equal(executable, "curl.exe");
       requests.push(args);
       const child = new EventEmitter();
-      queueMicrotask(() => {
-        const output = args[args.indexOf("--output") + 1];
-        const range = args.indexOf("--range");
-        let content = payload;
-        if (range >= 0 && !ignoreRanges) {
-          const [start, end] = args[range + 1].split("-").map(Number);
-          assert.ok(start <= end && end < payload.length);
-          content = payload.subarray(start, end + 1);
-        }
-        files.set(output, content);
-        child.emit("exit", 0);
+      const output = args[args.indexOf("--output") + 1];
+      const range = args.indexOf("--range");
+      let content = payload;
+      if (range >= 0 && !ignoreRanges) {
+        const [start, end] = args[range + 1].split("-").map(Number);
+        assert.ok(start <= end && end < payload.length);
+        content = payload.subarray(start, end + 1);
+      }
+      fs.writeFile(output, fail ? content.subarray(0, 1) : content, (error) => {
+        if (error) child.emit("error", error);
+        else child.emit("close", fail ? 18 : 0);
       });
       return child;
     },
   };
-  const fakeFs = {
-    mkdir: async () => {},
-    stat: async (file) => {
-      if (!files.has(file)) throw new Error("ENOENT");
-      return { size: files.get(file).length };
-    },
-    open: async (file) => {
-      files.set(file, Buffer.alloc(0));
-      return {
-        writeFile: async (bytes) => {
-          files.set(file, Buffer.concat([files.get(file), bytes]));
-        },
-        close: async () => {},
-      };
-    },
-    readFile: async (file) => files.get(file),
-    unlink: async (file) => files.delete(file),
-    rmdir: async () => {},
-  };
   const context = {
     module: { exports: {} },
+    URL,
     require(name) {
-      if (name === "node:child_process") return childProcess;
-      if (name === "node:fs/promises") return fakeFs;
-      if (name === "node:path") return path;
-      throw new Error(`Unexpected import: ${name}`);
+      return name === "node:child_process" ? childProcess : require(name);
     },
-    console: { log() {} },
   };
   vm.runInNewContext(
     fs.readFileSync(path.join(__dirname, "../scripts/download.cjs"), "utf8"),
     context,
   );
-  return { download: context.module.exports.download, files, payload, requests };
+  return {
+    download: context.module.exports.download,
+    target,
+    root,
+    payload,
+    requests,
+  };
 }
 
-test("archive download assembles uneven and small byte ranges exactly", async () => {
+async function verifyArchive({ target, payload, root }) {
+  assert.deepEqual(await fs.promises.readFile(target), payload);
+  assert.deepEqual(await fs.promises.readdir(root), [path.basename(target)]);
+}
+
+test("archive download assembles uneven and small byte ranges exactly", async (t) => {
   for (const size of [1, 7, 9, 19]) {
-    const run = fixture({ size });
-    await run.download("https://example.test/archive.zip", "archive.partial");
-    assert.deepEqual(run.files.get("archive.partial"), run.payload);
+    const run = await fixture(t, { size });
+    await run.download(url, run.target);
+    await verifyArchive(run);
     assert.equal(run.requests.length, Math.min(8, size));
-    assert.equal(run.files.size, 1);
   }
 });
 
-test("archive download falls back to GET when HEAD is rejected", async () => {
-  const run = fixture({ rejectHead: true });
-  await run.download("https://example.test/archive.zip", "archive.partial");
-  assert.deepEqual(run.files.get("archive.partial"), run.payload);
+test("archive download falls back to GET when HEAD is rejected", async (t) => {
+  const run = await fixture(t, { rejectHead: true });
+  await run.download(url, run.target);
+  await verifyArchive(run);
   assert.equal(run.requests.length, 1);
 });
 
-test("archive download handles proxies that ignore byte ranges", async () => {
-  const run = fixture({ ignoreRanges: true });
-  await run.download("https://example.test/archive.zip", "archive.partial");
-  assert.deepEqual(run.files.get("archive.partial"), run.payload);
+test("archive download handles proxies that ignore byte ranges", async (t) => {
+  const run = await fixture(t, { ignoreRanges: true });
+  await run.download(url, run.target);
+  await verifyArchive(run);
   assert.equal(run.requests.length, 9);
   assert.equal(run.requests.at(-1).includes("--range"), false);
-  assert.equal(run.files.size, 1);
+});
+
+test("a failed download preserves the previous archive and removes partial files", async (t) => {
+  const run = await fixture(t, { fail: true });
+  await fs.promises.writeFile(run.target, run.payload);
+  await assert.rejects(run.download(url, run.target), /did not complete/);
+  await verifyArchive(run);
+  await assert.rejects(
+    run.download("http://example.test/archive.zip", run.target),
+    /https/,
+  );
+  assert.ok(run.requests.every((args) => args.includes("--proto-redir")));
 });

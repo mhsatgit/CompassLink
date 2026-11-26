@@ -10,13 +10,15 @@
     <main>
       <header class="top">
         <div>
-          <div class="eyebrow">USB + wireless sensor bridge &middot; local dashboard</div>
+          <div class="eyebrow">
+            USB + wireless sensor bridge &middot; local dashboard
+          </div>
           <h1>CompassLink3D</h1>
           <p class="sub">Live Android orientation, rendered on your PC.</p>
         </div>
         <div id="badge" class="badge">
           <span class="dot"></span
-          ><span id="connection">Waiting for phone</span>
+          ><span id="connection" role="status">Waiting for phone</span>
         </div>
       </header>
       <section class="connection-bar card" aria-label="Phone connection">
@@ -24,22 +26,43 @@
           <div class="eyebrow">Connection mode</div>
           <p id="active-mode" aria-live="polite">No active stream</p>
         </div>
-        <div class="mode-options" role="group" aria-label="Connection instructions">
-          <button type="button" class="mode-button selected" data-mode="usb" aria-pressed="true">USB cable</button>
-          <button type="button" class="mode-button" data-mode="wireless" aria-pressed="false">Wireless debugging</button>
+        <div
+          class="mode-options"
+          role="group"
+          aria-label="Connection instructions"
+        >
+          <button
+            type="button"
+            class="mode-button selected"
+            data-mode="usb"
+            aria-pressed="true"
+          >
+            USB cable
+          </button>
+          <button
+            type="button"
+            class="mode-button"
+            data-mode="wireless"
+            aria-pressed="false"
+          >
+            Wireless debugging
+          </button>
         </div>
       </section>
       <section class="grid">
         <article class="card">
           <div class="cardhead">
             <h2>Phone orientation</h2>
-            <span class="hint"
-              >Live pose · drag to orbit · double-click to reset</span
+            <span class="hint" id="pose-controls"
+              >Drag or use arrow keys to orbit · double-click or Home to
+              reset</span
             >
           </div>
           <canvas
             id="view"
             aria-label="Three-dimensional phone orientation"
+            aria-describedby="pose-controls"
+            tabindex="0"
           ></canvas>
         </article>
         <article class="card">
@@ -75,6 +98,60 @@
           </div>
         </article>
       </section>
+      <section
+        class="card controller-card"
+        id="motion-panel"
+        aria-labelledby="motion-title"
+        hidden
+      >
+        <div class="cardhead">
+          <h2 id="motion-title">Motion diagnostics</h2>
+          <span class="hint" id="motion-status">Waiting for motion</span>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="label">Orientation and fallback</div>
+            <div class="hint" id="motion-source">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Mapping and output</div>
+            <div class="hint" id="motion-mapping">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Sensors and measured rates</div>
+            <div class="hint" id="motion-rates">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Recentered quaternion · x, y, z, w</div>
+            <div class="hint" id="motion-relative-q">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Absolute pitch / yaw / roll</div>
+            <div class="hint" id="motion-absolute">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Relative pitch / yaw / roll</div>
+            <div class="hint" id="motion-relative-angles">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Raw gyro · rad/s</div>
+            <div class="hint" id="motion-gyro">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Acceleration incl. gravity · m/s²</div>
+            <div class="hint" id="motion-accel">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Processed X / Y</div>
+            <div class="hint" id="motion-processed">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Last accepted motion output</div>
+            <div class="hint" id="motion-emitted">—</div>
+          </div>
+        </div>
+      </section>
+
       <section class="card controller-card" aria-labelledby="controller-title">
         <div class="cardhead">
           <h2 id="controller-title">Motion Control</h2>
@@ -98,6 +175,14 @@
             <div class="value" id="controller-activity">Waiting for phone</div>
           </div>
           <div class="stat controller-wide">
+            <div class="label">Hybrid and profile switching</div>
+            <div class="hint" id="controller-hybrid">—</div>
+            <div class="hint" id="controller-switch">—</div>
+            <div class="hint" id="controller-motion-owners">—</div>
+            <div class="hint" id="controller-analog-owners">—</div>
+            <div class="hint" id="controller-digital-owners">—</div>
+          </div>
+          <div class="stat controller-wide">
             <div class="label">Controller mappings</div>
             <ul id="controller-controls" class="controller-controls"></ul>
             <div class="hint" id="controller-last">No controller events</div>
@@ -105,25 +190,72 @@
           </div>
         </div>
       </section>
+      <section class="card controller-card" aria-labelledby="gamepad-title">
+        <div class="cardhead">
+          <h2 id="gamepad-title">Virtual Gamepad</h2>
+          <span class="hint" id="gamepad-status"
+            >Checking the Windows helper</span
+          >
+        </div>
+        <div class="stats">
+          <div class="stat controller-wide">
+            <div class="hint" id="gamepad-backend"></div>
+            <p id="gamepad-message"></p>
+            <div class="hint" id="gamepad-activity"></div>
+            <div class="hint" id="gamepad-last"></div>
+          </div>
+          <div class="stat" id="gamepad-commanded"></div>
+          <div class="stat" id="gamepad-observed"></div>
+        </div>
+      </section>
       <section class="bottom">
         <article class="card info">
           <h2>Connect your phone</h2>
           <div id="guide-usb">
-            <p>Enable USB debugging, connect a data cable, and accept the authorization prompt.</p>
+            <p>
+              Enable USB debugging, connect a data cable, and accept the
+              authorization prompt.
+            </p>
             <pre><code>npm run connect:usb</code></pre>
-            <p>Run <code>npm start</code>, then tap <strong>Start streaming</strong> on your phone.</p>
-            <span class="pill">Android 8+</span><span class="pill">No Wi-Fi needed</span>
+            <p>
+              Run <code>npm start</code>, then tap
+              <strong>Start streaming</strong> on your phone.
+            </p>
+            <span class="pill">Android 8+</span
+            ><span class="pill">No Wi-Fi needed</span>
           </div>
           <div id="guide-wireless" hidden>
-            <p>On Android 11+, connect both devices to the same Wi-Fi. Enable Developer options &gt; Wireless debugging &gt; Pair device with pairing code.</p>
+            <p>
+              On Android 11+, connect both devices to the same Wi-Fi. Enable
+              Developer options &gt; Wireless debugging &gt; Pair device with
+              pairing code.
+            </p>
             <pre><code>npm run connect:wireless -- -Pair</code></pre>
-            <p>Enter the pairing address and code when prompted, then the connection address from the main Wireless debugging page. These ports are different.</p>
+            <p>
+              Enter the pairing address and code when prompted, then the
+              connection address from the main Wireless debugging page. These
+              ports are different.
+            </p>
             <pre><code>npm run connect:wireless</code></pre>
-            <p>Use this shorter command after pairing. Run <code>npm start</code> and tap <strong>Start streaming</strong>. No USB cable is required.</p>
-            <span class="pill">Android 11+</span><span class="pill">Same Wi-Fi</span>
+            <p>
+              Use this shorter command after pairing. Run
+              <code>npm start</code> and tap <strong>Start streaming</strong>.
+              No USB cable is required.
+            </p>
+            <span class="pill">Android 11+</span
+            ><span class="pill">Same Wi-Fi</span>
           </div>
-          <p class="connection-note">These buttons show setup instructions. Run the commands in the project terminal. For a manually installed APK, use <code>npm run connect:prebuilt:usb</code> or <code>npm run connect:prebuilt:wireless</code> (add <code>-- -Pair</code> for first-time wireless pairing). Source commands also reuse installed apps; pass <code>-- -Reinstall</code> after rebuilding.</p>
-          <span class="pill">No cloud services</span><span class="pill">Local dashboard</span>
+          <p class="connection-note">
+            These buttons show setup instructions. Run the commands in the
+            project terminal. For a manually installed APK, use
+            <code>npm run connect:prebuilt:usb</code> or
+            <code>npm run connect:prebuilt:wireless</code> (add
+            <code>-- -Pair</code> for first-time wireless pairing). Source
+            commands also reuse installed apps; pass
+            <code>-- -Reinstall</code> after rebuilding.
+          </p>
+          <span class="pill">No cloud services</span
+          ><span class="pill">Local dashboard</span>
         </article>
         <article class="card info">
           <h2>Orientation notes</h2>
@@ -139,4 +271,3 @@
     <script type="module" src="/dashboard.js"></script>
   </body>
 </html>
-

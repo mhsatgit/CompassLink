@@ -24,7 +24,7 @@ android {
         minSdk = 26
         // Runtime behavior upgrades are separate from the build-tool migration.
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2-snapshot.2"
+        versionCode = 9
+        versionName = "1.0.0"
     }
 }

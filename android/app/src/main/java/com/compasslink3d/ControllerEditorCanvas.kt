@@ -29,6 +29,11 @@ internal class ControllerEditorCanvas(
 
     fun selectControl(id: String?) { selectedId = id }
     fun clamp(control: LayoutControl) = viewport?.clamp(control) ?: control
+    fun cancelDrag() {
+        val active = drag ?: return
+        drag = null
+        change(active.original, true)
+    }
 
     fun overlap(control: LayoutControl): Double {
         val box = viewport?.box(control) ?: return 0.0
@@ -62,7 +67,7 @@ internal class ControllerEditorCanvas(
                 val hit = if (gesture == Gesture.MOVE) {
                     physical.lastOrNull { it.contains(position) }
                 } else selected
-                select(hit?.model?.id)
+                select(hit?.model?.id ?: models.firstOrNull { it.type == ControlType.TOUCH_LOOK }?.id)
                 if (hit != null) drag = Drag(event.getPointerId(index), gesture, position, hit.model, hit.box, hit.model)
             }
             MotionEvent.ACTION_MOVE -> {
@@ -73,20 +78,20 @@ internal class ControllerEditorCanvas(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                 val active = drag ?: return true
                 if (event.getPointerId(index) == active.pointer) {
-                    if ((event.flags and MotionEvent.FLAG_CANCELED) == 0) {
+                    if (!event.isCanceledRelease()) {
                         update(active, point(index))
                         change(active.current, true)
+                        if (active.current == active.original) performClick()
                     } else change(active.original, true)
                     drag = null
                 }
             }
-            MotionEvent.ACTION_CANCEL -> {
-                drag?.let { change(it.original, true) }
-                drag = null
-            }
+            MotionEvent.ACTION_CANCEL -> cancelDrag()
         }
         return true
     }
+
+    override fun performClick(): Boolean = super.performClick()
 
     private fun update(drag: Drag, position: LayoutPoint) {
         val area = viewport ?: return

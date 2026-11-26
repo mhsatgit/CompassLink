@@ -12,7 +12,7 @@ profiles/
 outputs/
 dist/
 *.apk
-!apk/CompassLink3Dv1.[0-9]*.apk
+!/apk/CompassLink3D.apk
 *.aab
 *.exe
 *.msi
@@ -26,4 +26,21 @@ dist/
 .env
 .env.*
 !.env.example
-.sourceignore
+pc/windows/**/bin/
+pc/windows/**/obj/
+controller-authorization.json
+*.apks
+*.idsig
+*.pfx
+*.apk.sha256
+!/apk/CompassLink3D.apk.sha256
+*.p12
+*.trace
+controller-profiles.json
+key.properties
+
+# Local planning, reviews, and captures
+/Plan.md
+/fix.md
+/fix-assets/
+/docs/screens/

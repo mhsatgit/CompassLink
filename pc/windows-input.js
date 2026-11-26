@@ -145,6 +145,13 @@ class WindowsInput extends EventEmitter {
         this.message = "Windows input engine ready";
       } else if (line.startsWith("error ")) {
         fail(line.slice(6));
+      } else if (line === "switch-reset") {
+        this.emit("switch-reset");
+      } else if (line === "keyboard-hid") {
+        this.message = "CompassLink Virtual USB HID Keyboard connected";
+      } else if (line === "keyboard-sendinput") {
+        this.message =
+          "Windows software keyboard ready. Run npm run start:gamepad for HID keyboard input.";
       }
     });
     child.stdin.on("error", (error) => {
@@ -170,6 +177,30 @@ class WindowsInput extends EventEmitter {
     }
     stdin.write(command + "\n");
     return true;
+  }
+
+  release() {
+    const child = this.child;
+    if (!child) return Promise.resolve(false);
+    if (this.releasing) return this.releasing;
+    this.releasing = new Promise((resolve) => {
+      const finish = (released) => {
+        clearTimeout(timeout);
+        this.off("switch-reset", confirmed);
+        child.off("close", exited);
+        resolve(released);
+      };
+      const confirmed = () => finish(true);
+      const exited = (code) => finish(code === 0);
+      const timeout = setTimeout(() => finish(false), 3500);
+      this.once("switch-reset", confirmed);
+      // The helper also releases everything on EOF before closing.
+      child.once("close", exited);
+      if (!this.send("reset-for-switch")) child.stdin.end();
+    }).finally(() => {
+      this.releasing = null;
+    });
+    return this.releasing;
   }
 
   async close() {

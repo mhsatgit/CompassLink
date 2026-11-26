@@ -74,3 +74,71 @@ test("profile validator bounds names and counts and requires unique, valid ident
   ])
     assert.equal(validateProfile(invalid), null);
 });
+
+test("protocol 4 validates a separate motion owner and target for the selected output mode", () => {
+  const value = {
+    id: "layout",
+    name: "Motion layout",
+    controls: [],
+    motion: {
+      id: "motion-input-1",
+      mapping: "STICK",
+      source: "ORIENTATION",
+      stick: "LEFT_STICK",
+    },
+  };
+  const gamepad = validateProfile(value, "gamepad", 4);
+  assert.equal(gamepad.motion.bindings.get("axis").target, "LEFT_STICK");
+  assert.equal(gamepad.controls.get("motion-input-1"), gamepad.motion);
+  assert.equal(validateProfile(value, "gamepad", 3), null);
+  assert.equal(validateProfile(value, "keyboard", 4), null);
+  assert.equal(validateProfile({ ...value, motion: null }, "gamepad", 4), null);
+  for (const motion of [
+    { ...value.motion, stick: "LEFT_TRIGGER" },
+    { ...value.motion, source: "OTHER" },
+    { ...value.motion, rate: Infinity },
+    { ...value.motion, id: 3 },
+  ])
+    assert.equal(validateProfile({ ...value, motion }, "gamepad", 4), null);
+  const collision = {
+    id: value.motion.id,
+    label: "Existing",
+    type: "BUTTON",
+    bindings: {},
+  };
+  assert.equal(
+    validateProfile({ ...value, controls: [collision] }, "gamepad", 4),
+    null,
+  );
+  const steer = {
+    id: "steer",
+    mapping: "STEERING",
+    source: "ORIENTATION",
+    leftKey: "A",
+    rightKey: "D",
+  };
+  assert.equal(
+    validateProfile(
+      { ...value, motion: steer },
+      "keyboard",
+      4,
+    ).motion.bindings.get("right").key,
+    "D",
+  );
+  assert.equal(
+    validateProfile(
+      { ...value, motion: { ...steer, leftKey: "D" } },
+      "keyboard",
+      4,
+    ),
+    null,
+  );
+  assert.equal(
+    validateProfile(
+      { ...value, motion: { ...steer, source: "GYROSCOPE" } },
+      "keyboard",
+      4,
+    ),
+    null,
+  );
+});

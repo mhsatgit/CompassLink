@@ -1,95 +1,138 @@
-
 const { spawn, execFileSync } = require("node:child_process");
+const { createReadStream, createWriteStream } = require("node:fs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-async function curl(args) {
-  await new Promise((resolve, reject) => {
+const { pipeline } = require("node:stream/promises");
+
+const CURL_OPTIONS = [
+  "--fail",
+  "--location",
+  "--silent",
+  "--show-error",
+  "--proto",
+  "=https",
+  "--proto-redir",
+  "=https",
+  "--connect-timeout",
+  "20",
+  "--speed-limit",
+  "1024",
+  "--speed-time",
+  "45",
+];
+
+function curl(args) {
+  return new Promise((resolve, reject) => {
     const child = spawn(
       "curl.exe",
-      [
-        "--fail",
-        "--location",
-        "--silent",
-        "--show-error",
-        "--retry",
-        "2",
-        ...args,
-      ],
-      { windowsHide: true, stdio: "inherit" },
+      [...CURL_OPTIONS, "--retry", "2", ...args],
+      {
+        windowsHide: true,
+        stdio: "inherit",
+      },
     );
     child.on("error", reject);
-    child.on("exit", (code) =>
+    child.on("close", (code) =>
       code === 0
         ? resolve()
-        : reject(new Error(`Download exited with ${code}`)),
+        : reject(
+            new Error(
+              "Archive download did not complete (curl exit " + code + ")",
+            ),
+          ),
     );
   });
 }
-async function download(url, target) {
-  if (!url || !target || !/^https:\/\//i.test(url)) {
-    throw new Error("Usage: node scripts/download.cjs https://URL OUTPUT_FILE");
-  }
-  await fs.mkdir(path.dirname(path.resolve(target)), { recursive: true });
-  let headers;
+
+function rangeSize(url) {
   try {
-    headers = execFileSync(
-      "curl.exe",
-      ["--fail", "--location", "--silent", "--show-error", "--head", url],
-      { encoding: "utf8", windowsHide: true },
-    );
+    const headers = execFileSync("curl.exe", [...CURL_OPTIONS, "--head", url], {
+      encoding: "utf8",
+      windowsHide: true,
+    })
+      .trim()
+      .split(/\r?\n\r?\n/)
+      .at(-1);
+    const bytes = Number(headers.match(/^Content-Length:[ \t]*(\d+)/im)?.[1]);
+    if (
+      Number.isSafeInteger(bytes) &&
+      bytes > 0 &&
+      /^Accept-Ranges:[ \t]*bytes/im.test(headers)
+    )
+      return bytes;
   } catch {
-    // Some download hosts reject HEAD even though GET works.
-    await curl(["--output", target, url]);
-    return;
+    // A host can reject HEAD and still support a regular GET.
   }
-  const sizes = [...headers.matchAll(/^Content-Length:\s*(\d+)/gim)];
-  const size = Number(sizes.at(-1)?.[1]);
-  if (!size || !/Accept-Ranges:\s*bytes/i.test(headers)) {
-    await curl(["--output", target, url]);
-    return;
+  return 0;
+}
+
+async function download(url, target) {
+  let address;
+  try {
+    address = new URL(url);
+  } catch {
+    /* Checked below. */
   }
-  const partRoot = `${target}.parts`;
-  await fs.mkdir(partRoot, { recursive: true });
+  if (
+    !target ||
+    address?.protocol !== "https:" ||
+    address.username ||
+    address.password
+  )
+    throw new Error("Usage: node scripts/download.cjs https://URL OUTPUT_FILE");
+
+  const destination = path.resolve(target);
+  const parent = path.dirname(destination);
+  await fs.mkdir(parent, { recursive: true });
+  const stage = await fs.mkdtemp(path.join(parent, ".compasslink-download-"));
+  const archive = path.join(stage, "archive");
+  const size = rangeSize(address.href);
   const count = Math.min(8, size);
-  async function clearParts() {
-    for (let i = 0; i < count; i++) {
-      await fs.unlink(path.join(partRoot, `${i}`)).catch((error) => {
+  const parts = Array.from({ length: count }, (_, index) =>
+    path.join(stage, String(index)),
+  );
+
+  try {
+    const ranges = await Promise.allSettled(
+      parts.map(async (file, index) => {
+        const start = Math.floor((size * index) / count);
+        const end = Math.floor((size * (index + 1)) / count) - 1;
+        await curl([
+          "--range",
+          [start, end].join("-"),
+          "--output",
+          file,
+          address.href,
+        ]);
+        if ((await fs.stat(file)).size !== end - start + 1)
+          throw new Error("Unexpected archive range size");
+      }),
+    );
+
+    if (count && ranges.every((result) => result.status === "fulfilled")) {
+      async function* archiveParts() {
+        for (const part of parts) yield* createReadStream(part);
+      }
+      await pipeline(archiveParts(), createWriteStream(archive));
+    } else {
+      // Wait for the range downloads to settle before a full download.
+      await curl(["--output", archive, address.href]);
+    }
+
+    const bytes = (await fs.stat(archive)).size;
+    if (bytes === 0 || (size && bytes !== size))
+      throw new Error("Archive size mismatch");
+    await fs.rename(archive, destination);
+  } finally {
+    for (const file of [...parts, archive]) {
+      await fs.unlink(file).catch((error) => {
         if (error.code !== "ENOENT") throw error;
       });
     }
-    await fs.rmdir(partRoot);
+    await fs.rmdir(stage);
   }
-  const results = await Promise.allSettled(
-    Array.from({ length: count }, async (_, i) => {
-      const start = Math.floor((size * i) / count),
-        end = Math.floor((size * (i + 1)) / count) - 1;
-      const file = path.join(partRoot, `${i}`);
-      if ((await fs.stat(file).catch(() => null))?.size !== end - start + 1) {
-        await curl(["--range", `${start}-${end}`, "--output", file, url]);
-      }
-      if ((await fs.stat(file)).size !== end - start + 1)
-        throw new Error("Download server returned an unexpected range size");
-      console.log(`Downloaded ${i + 1}/${count} archive parts`);
-      return file;
-    }),
-  );
-  if (results.some((result) => result.status === "rejected")) {
-    // Wait for all requests before falling back when a proxy ignores byte ranges.
-    await curl(["--output", target, url]);
-    await clearParts();
-    return;
-  }
-  const parts = results.map((result) => result.value);
-  const output = await fs.open(target, "w");
-  try {
-    for (const part of parts) await output.writeFile(await fs.readFile(part));
-  } finally {
-    await output.close();
-  }
-  if ((await fs.stat(target)).size !== size)
-    throw new Error("Archive size mismatch");
-  await clearParts();
 }
+
 if (require.main === module) {
   download(...process.argv.slice(2)).catch((error) => {
     console.error(error.message);

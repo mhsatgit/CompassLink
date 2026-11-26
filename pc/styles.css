@@ -101,6 +101,11 @@ canvas {
   display: block;
   width: 100%;
   height: 430px;
+  touch-action: none;
+}
+canvas:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -3px;
 }
 .stats {
   display: grid;
@@ -160,6 +165,60 @@ canvas {
 }
 .controller-error {
   color: var(--red);
+}
+.gamepad-buttons,
+.gamepad-analog {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gamepad-button {
+  padding: 4px 9px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.gamepad-button.held {
+  color: #101a2b;
+  background: var(--cyan);
+  border-color: var(--cyan);
+}
+#gamepad-commanded h3,
+#gamepad-observed h3 {
+  margin: 0;
+  font-size: 14px;
+}
+#gamepad-message {
+  margin: 8px 0;
+}
+.gamepad-analog {
+  margin-top: 14px;
+  gap: 12px;
+}
+.gamepad-stick {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #101b30;
+  margin: 4px 0;
+}
+.gamepad-stick span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  transition: transform 60ms linear;
+}
+.gamepad-coordinates {
+  font-variant-numeric: tabular-nums;
+}
+.gamepad-analog meter {
+  display: block;
+  width: 72px;
+  margin-top: 9px;
 }
 .bottom {
   display: grid;

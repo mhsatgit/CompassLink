@@ -7,7 +7,9 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.accessibility.AccessibilityEvent
@@ -18,6 +20,8 @@ import kotlin.math.roundToInt
 internal const val CANVAS_BACKGROUND = 0xFF0A1020.toInt()
 internal const val CANVAS_ACCENT = 0xFF52D9E9.toInt()
 internal const val CANVAS_TEXT = 0xFFEDF4FF.toInt()
+
+internal fun MotionEvent.isCanceledRelease() = Build.VERSION.SDK_INT >= 33 && (flags and MotionEvent.FLAG_CANCELED) != 0
 
 internal open class ControllerCanvas(context: Context, private val editing: Boolean) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -39,7 +43,8 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
 
     private fun rebuild() {
         physical = viewport?.let { area ->
-            models.filter { editing || it.style.visible }.map { PhysicalControl(it, area.box(it)) }
+            models.filter { it.type != ControlType.TOUCH_LOOK && (editing || it.style.visible) }
+                .map { PhysicalControl(it, area.box(it)) }
         }.orEmpty()
         onPhysicalLayout()
         invalidate()
@@ -61,6 +66,16 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
             val spacing = dp(20).toInt().coerceAtLeast(1)
             for (x in spacing until width step spacing) {
                 for (y in spacing until height step spacing) canvas.drawCircle(x.toFloat(), y.toFloat(), dp(1).toFloat(), paint)
+            }
+            models.firstOrNull { it.type == ControlType.TOUCH_LOOK && it.id == selectedId }?.let { layer ->
+                paint.color = CANVAS_ACCENT
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = dp(2).toFloat()
+                val edge = dp(4).toFloat()
+                canvas.drawRect(edge, edge, width - edge, height - edge, paint)
+                paint.style = Paint.Style.FILL
+                text(canvas, layer.displayName, width / 2f, dp(18).toFloat(), dp(14).toFloat(),
+                    CANVAS_ACCENT, 255, width * .8f)
             }
         }
         for (control in physical) drawControl(canvas, control)
@@ -144,7 +159,8 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
                 }
                 text(canvas, control.label, 0f, 0f, labelSize, labelColor, alpha, halfW * 1.7f)
             }
-            ControlType.BUTTON -> text(canvas, control.label, 0f, 0f, labelSize, labelColor, alpha, halfW * 1.72f)
+            ControlType.BUTTON, ControlType.TILT, ControlType.PROFILE_SWITCH, ControlType.TOUCH_LOOK ->
+                text(canvas, control.label, 0f, 0f, labelSize, labelColor, alpha, halfW * 1.72f)
         }
         canvas.restore()
     }
@@ -193,11 +209,23 @@ internal open class ControllerCanvas(context: Context, private val editing: Bool
     }
 }
 
-internal class ControllerPad(context: Context, profile: ControllerProfile, send: (ControllerInput) -> Unit) :
+internal class ControllerPad(context: Context, profile: ControllerProfile, private val mode: OutputMode,
+    onSwitch: (String) -> Unit = {}, send: (ControllerInput) -> Unit) :
     ControllerCanvas(context, editing = false) {
-    private val touch = ControllerTouchEngine(density, send)
+    private val haptics = profile.hybrid?.haptics ?: TouchHaptics.OFF
+    var onPointerReleased: (String) -> Unit = {}
+    private val touch = ControllerTouchEngine(density, send, mode, { feedback(haptics) }, onSwitch) { onPointerReleased(it) }
+    private val hasMouseLook = profile.controls.any { it.style.visible && it.bindings[Slot.POINTER]?.supports(mode) == true }
     private var ready = false
     private var accessibleFocus = View.NO_ID
+    private var scheduledExpiry: Long? = null
+    private val expireMotion = Runnable {
+        scheduledExpiry = null
+        touch.expireMotion(SystemClock.uptimeMillis())
+        scheduleMotionExpiry()
+        invalidate()
+    }
+    private val acceptsInput get() = ready && isShown && hasWindowFocus()
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -212,29 +240,73 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, send:
 
     fun releaseAll(notify: Boolean = true) {
         touch.clear(notify && ready)
+        scheduleMotionExpiry()
         invalidate()
+    }
+
+    fun updateTilt(angle: Double) {
+        if (!acceptsInput) return
+        if (touch.updateTilt(angle, SystemClock.uptimeMillis())) invalidate()
+        scheduleMotionExpiry()
+    }
+
+    private fun scheduleMotionExpiry() {
+        val expiry = touch.motionExpiry
+        if (scheduledExpiry == expiry) return
+        scheduledExpiry = expiry
+        removeCallbacks(expireMotion)
+        if (expiry != null) postDelayed(expireMotion, (expiry - SystemClock.uptimeMillis()).coerceAtLeast(0L))
     }
 
     override fun onPhysicalLayout() {
         releaseAll()
         touch.controls = physical
+        touch.backgroundLook = models.firstOrNull { it.type == ControlType.TOUCH_LOOK && it.style.visible &&
+            it.bindings[Slot.POINTER]?.supports(mode) == true }?.let { layer ->
+            viewport?.let { area -> PhysicalControl(layer, area.box(layer)) }
+        }
     }
 
-    override fun pressed(id: String, slot: Slot?) = touch.active(id, slot) || (slot == null && touch.touched(id))
+    override fun pressed(id: String, slot: Slot?) =
+        touch.active(id, slot) || (slot == null && (touch.touched(id) || touch.tiltEnabled(id)))
     override fun axes(id: String) = touch.value(id)
 
+    private fun hasClickBinding(control: LayoutControl) = when (control.type) {
+        ControlType.TILT -> control.bindings.values.any { it.supports(mode) }
+        ControlType.PROFILE_SWITCH -> true
+        ControlType.TOUCHPAD -> (mode == OutputMode.HYBRID || control.bindings[Slot.AXIS]?.supports(mode) != true) &&
+            control.bindings[Slot.TAP]?.supports(mode) == true
+        else -> control.bindings[Slot.PRESS]?.supports(mode) == true
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!ready || !hasWindowFocus()) return true
+        if (!acceptsInput) return true
         fun position(index: Int) = LayoutPoint(event.getX(index).toDouble(), event.getY(index).toDouble())
         val index = event.actionIndex
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN && hasMouseLook) requestUnbufferedDispatch(event)
                 touch.down(event.getPointerId(index), position(index), event.eventTime)
-            MotionEvent.ACTION_MOVE -> for (i in 0 until event.pointerCount) touch.move(event.getPointerId(i), position(i))
+            }
+            MotionEvent.ACTION_MOVE -> {
+                for (history in 0 until event.historySize) {
+                    val time = event.getHistoricalEventTime(history)
+                    for (i in 0 until event.pointerCount) {
+                        val id = event.getPointerId(i)
+                        if (touch.tracksPointer(id)) {
+                            val sample = LayoutPoint(event.getHistoricalX(i, history).toDouble(), event.getHistoricalY(i, history).toDouble())
+                            touch.move(id, sample, time)
+                        }
+                    }
+                }
+                for (i in 0 until event.pointerCount)
+                    touch.move(event.getPointerId(i), position(i), event.eventTime)
+            }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP ->
-                touch.up(event.getPointerId(index), position(index), event.eventTime, (event.flags and MotionEvent.FLAG_CANCELED) != 0)
+                touch.up(event.getPointerId(index), position(index), event.eventTime, event.isCanceledRelease())
             MotionEvent.ACTION_CANCEL -> releaseAll()
         }
+        scheduleMotionExpiry()
         invalidate()
         return true
     }
@@ -260,10 +332,12 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, send:
                 className = "android.widget.Button"
                 contentDescription = control.displayName
                 isVisibleToUser = isShown
-                isEnabled = ready && hasWindowFocus()
+                isEnabled = acceptsInput
+                isCheckable = control.type == ControlType.TILT
+                isChecked = isCheckable && touch.tiltEnabled(control.id)
                 isFocusable = true
                 isAccessibilityFocused = accessibleFocus == id
-                isClickable = isEnabled && (Slot.PRESS in control.bindings || Slot.TAP in control.bindings)
+                isClickable = isEnabled && hasClickBinding(control)
                 @Suppress("DEPRECATION")
                 setBoundsInParent(local)
                 local.offset(location[0], location[1])
@@ -279,8 +353,10 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, send:
             val item = physical.getOrNull(id) ?: return false
             val eventType = when (action) {
                 AccessibilityNodeInfo.ACTION_CLICK -> {
-                    if (!ready || !hasWindowFocus() || (Slot.PRESS !in item.model.bindings && Slot.TAP !in item.model.bindings)) return false
+                    if (!acceptsInput || !hasClickBinding(item.model)) return false
                     touch.click(item.model)
+                    scheduleMotionExpiry()
+                    invalidate()
                     AccessibilityEvent.TYPE_VIEW_CLICKED
                 }
                 AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> {
@@ -302,4 +378,14 @@ internal class ControllerPad(context: Context, profile: ControllerProfile, send:
             return true
         }
     }
+}
+
+internal fun View.feedback(level: TouchHaptics) {
+    if (level == TouchHaptics.OFF) return
+    val effect = if (Build.VERSION.SDK_INT >= 30) when (level) {
+        TouchHaptics.LIGHT -> android.view.HapticFeedbackConstants.CLOCK_TICK
+        TouchHaptics.MEDIUM -> android.view.HapticFeedbackConstants.CONFIRM
+        else -> android.view.HapticFeedbackConstants.LONG_PRESS
+    } else android.view.HapticFeedbackConstants.VIRTUAL_KEY
+    post { if (isAttachedToWindow) performHapticFeedback(effect) }
 }

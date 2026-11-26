@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="usb_link">USB</string>
+    <string name="wireless_link">Wireless debugging</string>
+    <string name="controller_link_status">%1$s · %2$s</string>
+    <string name="app_name">CompassLink3D</string>
+    <string name="mouse_sensitivity">Touch sensitivity</string>
+    <string name="mouse_sensitivity_value">Touch sensitivity · %1$.2f×</string>
+    <string name="mouse_sensitivity_preset">%1$.2f×</string>
+    <string name="sensor_ready">Ready - USB or wireless ADB tunnel required</string>
+    <string name="sensor_name">Sensor: %1$s</string>
+    <string name="sensor_unavailable">unavailable</string>
+    <string name="sensor_missing">No supported rotation-vector sensor found</string>
+    <string name="sensor_registration_failed">Unable to register orientation sensor</string>
+    <string name="start_streaming">Start streaming</string>
+    <string name="stop_streaming">Stop streaming</string>
+    <string name="streaming_stopped">Stopped</string>
+    <string name="controller_mode">Controller Mode</string>
+    <string name="unsaved_profile_title">%1$s *</string>
+    <string name="editor_tools_hint">Press Back or Escape to open editor tools</string>
+    <string name="profile_details">%1$s · %2$s</string>
+    <string name="built_in_profile_details">%1$s · %2$s · Built-in</string>
+    <plurals name="profile_control_count">
+        <item quantity="one">%d control</item>
+        <item quantity="other">%d controls</item>
+    </plurals>
+</resources>
