@@ -7,6 +7,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        env:
+          # Keep the committed LF endings expected by Prettier.
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: core.autocrlf
+          GIT_CONFIG_VALUE_0: "false"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -21,16 +26,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build and check a clean source export
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Extract a clean source export
         shell: pwsh
         run: |
           npm run export:source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           New-Item -ItemType Directory -Path dist/source-check | Out-Null
-          tar -xf "dist/CompassLink3D-v$version-source.zip" -C dist/source-check
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Set-Location dist/source-check
+          tar.exe -xf "dist/CompassLink3D-v$version-source.zip" -C dist/source-check
+      - name: Set up the Android toolchain
+        shell: pwsh
+        working-directory: dist/source-check
+        run: |
+          # The project's build scripts resolve Java from the source export.
+          New-Item -ItemType Directory -Path .tools | Out-Null
+          New-Item -ItemType Junction -Path .tools/jdk -Target $env:JAVA_HOME | Out-Null
           npm run setup:android
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm run test:android
+      - name: Build and test the Android app
+        working-directory: dist/source-check
+        run: npm run test:android
